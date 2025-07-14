@@ -75,7 +75,7 @@ export type Database = {
     年度: string | null
     开始时间: string | null
     结束时间: string | null
-    类型: string | null
+    险种类型: string | null
     缴交地: string | null
     缴交基数: number | null
     个人缴交比例: number | null

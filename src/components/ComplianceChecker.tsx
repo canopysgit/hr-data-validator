@@ -30,6 +30,8 @@ interface CheckResult {
     实际比例?: number;
     标准比例?: number;
     时间段?: string;
+    年度?: string;
+    缺失项目?: string[];
   }>;
 }
 
@@ -37,6 +39,7 @@ export default function ComplianceChecker() {
   const [checking, setChecking] = useState(false);
   const [checking1, setChecking1] = useState(false);
   const [checking2, setChecking2] = useState(false);
+  const [checking3, setChecking3] = useState(false);
   const [results, setResults] = useState<CheckResult[]>([]);
   const [selectedResult, setSelectedResult] = useState<CheckResult | null>(null);
 
@@ -48,7 +51,9 @@ export default function ComplianceChecker() {
   };
 
   const standardizeInsuranceType = (type: string): string => {
-    if (!type) return '';
+    if (!type || type === null || type === undefined) {
+      return '';
+    }
 
     const typeMapping: Record<string, string> = {
       // 养老保险相关
@@ -67,6 +72,11 @@ export default function ComplianceChecker() {
       '失业': '失业保险',
       '失业险': '失业保险',
       '失业保险': '失业保险',
+
+      // 工伤保险相关
+      '工伤': '工伤保险',
+      '工伤险': '工伤保险',
+      '工伤保险': '工伤保险',
 
       // 公积金相关
       '公积金': '公积金',
@@ -95,14 +105,38 @@ export default function ComplianceChecker() {
       const stdStartDate = new Date(normalizeDate(stdStart));
       const stdEndDate = new Date(normalizeDate(stdEnd));
 
-      // 优先级1：时间重叠匹配
+      // 优先级1：时间重叠匹配（包含边界情况）
+      // 员工时间段与标准时间段有任何重叠即可匹配
       if (empStartDate <= stdEndDate && empEndDate >= stdStartDate) {
         return true;
       }
 
-      // 优先级2：年度匹配
-      if (empStartDate.getFullYear() === stdStartDate.getFullYear()) {
+      // 优先级2：扩展的模糊匹配 - 允许30天的时间差
+      const timeDiffDays = 30;
+      const timeDiffMs = timeDiffDays * 24 * 60 * 60 * 1000;
+      
+      // 检查员工开始时间是否在标准时间段的扩展范围内
+      if (empStartDate >= new Date(stdStartDate.getTime() - timeDiffMs) && 
+          empStartDate <= new Date(stdEndDate.getTime() + timeDiffMs)) {
         return true;
+      }
+      
+      // 检查员工结束时间是否在标准时间段的扩展范围内
+      if (empEndDate >= new Date(stdStartDate.getTime() - timeDiffMs) && 
+          empEndDate <= new Date(stdEndDate.getTime() + timeDiffMs)) {
+        return true;
+      }
+
+      // 优先级3：扩展年度匹配 - 允许前后1年的差异
+      const empYear = empStartDate.getFullYear();
+      const stdYear = stdStartDate.getFullYear();
+      if (Math.abs(empYear - stdYear) <= 1) {
+        return true;
+      }
+
+      // 优先级4：针对未来年份的特殊处理 - 使用最近的有效年份
+      if (empYear > stdYear) {
+        return true; // 允许使用最近年份的标准
       }
 
       return false;
@@ -113,7 +147,7 @@ export default function ComplianceChecker() {
 
   const findMatchingStandard = (empRecord: Record<string, unknown>, cityStandardData: Record<string, unknown>[]): Record<string, unknown> | null => {
     const empCity = standardizeCity(empRecord.缴交地 as string);
-    const empType = standardizeInsuranceType(empRecord.类型 as string);
+    const empType = standardizeInsuranceType(empRecord.险种类型 as string);
     const empStartTime = empRecord.开始时间 as string;
     const empEndTime = empRecord.结束时间 as string;
 
@@ -127,6 +161,11 @@ export default function ComplianceChecker() {
       const cityMatch = empCity === stdCity;
       const typeMatch = empType === stdType;
       const timeMatch = isTimeMatch(empStartTime, empEndTime, stdStartTime, stdEndTime);
+
+      // 添加调试日志，特别关注时间匹配问题
+      if (cityMatch && typeMatch) {
+        console.log(`🕐 时间匹配检查: 员工[${empStartTime} ~ ${empEndTime}] vs 标准[${stdStartTime} ~ ${stdEndTime}] => ${timeMatch}`);
+      }
 
       return cityMatch && typeMatch && timeMatch;
     }) || [];
@@ -191,19 +230,9 @@ export default function ComplianceChecker() {
     };
   };
 
-  // 检查2：员工社保缴纳比例一致性检查（包含险种完整性和比例准确性）
+  // 检查2：员工社保缴纳比例一致性检查
   const checkContributionRatioCompliance = async (): Promise<CheckResult> => {
-    console.log('🔍 开始检查员工社保缴纳比例一致性（含险种完整性）...');
-
-    // 查询所有员工基本信息
-    const { data: employeeBasicData, error: empBasicError } = await supabase
-      .from(TABLE_NAMES.EMPLOYEE_BASIC_INFO)
-      .select('*');
-
-    if (empBasicError) {
-      console.error('❌ 查询员工基本信息失败:', empBasicError);
-      throw empBasicError;
-    }
+    console.log('🔍 开始检查员工社保缴纳比例一致性...');
 
     // 查询所有员工社保数据
     const { data: employeeSocialData, error: empSocialError } = await supabase
@@ -226,33 +255,30 @@ export default function ComplianceChecker() {
     }
 
     console.log('📊 数据查询结果:');
-    console.log('  - 员工基本信息条数:', employeeBasicData?.length);
     console.log('  - 员工社保数据条数:', employeeSocialData?.length);
     console.log('  - 城市标准数据条数:', cityStandardData?.length);
-
-    // 详细查看数据内容
-    if (employeeBasicData && employeeBasicData.length > 0) {
-      console.log('👥 员工基本信息示例:');
-      console.log('  - 第一条:', employeeBasicData[0]);
-      console.log('  - 员工工号列表:', employeeBasicData.map(emp => emp.员工工号));
-    }
+    
+    // 🔍 调试：检查北京养老保险的标准配置
+    const beijingPension = cityStandardData?.filter((std: Record<string, unknown>) => 
+      standardizeCity(std.城市 as string) === '北京' && 
+      standardizeInsuranceType(std.险种类型 as string) === '养老保险'
+    );
+    console.log('🏛️ 北京养老保险标准配置:', beijingPension);
+    
+    // 🔍 调试：检查时间范围
+    console.log('📅 员工时间段:', '2025-06-30 至 2026-06-30');
+    console.log('📅 标准时间段示例:', cityStandardData?.slice(0, 3).map((std: Record<string, unknown>) => 
+      `${std.城市}-${std.险种类型}: ${std.生效日期} ~ ${std.失效日期}`
+    ));
 
     if (employeeSocialData && employeeSocialData.length > 0) {
       console.log('🏥 员工社保数据示例:');
       console.log('  - 第一条:', employeeSocialData[0]);
-      console.log('  - 社保记录分布:', employeeSocialData.reduce((acc: Record<string, number>, item: Record<string, unknown>) => {
-        const empId = item.员工工号 as string;
-        acc[empId] = (acc[empId] || 0) + 1;
-        return acc;
-      }, {}));
     }
 
     if (cityStandardData && cityStandardData.length > 0) {
       console.log('🏛️ 城市标准配置示例:');
       console.log('  - 第一条:', cityStandardData[0]);
-      console.log('  - 标准配置分布:', cityStandardData.map((std: Record<string, unknown>) =>
-        `${std.城市}-${std.险种类型}-${std.个人缴费比例}`
-      ));
     }
 
     const issues: Array<{
@@ -269,87 +295,65 @@ export default function ComplianceChecker() {
     // 需要检查的个人缴费险种（4项基本险种）
     const requiredInsuranceTypes = ['养老保险', '医疗保险', '失业保险', '公积金'];
 
-    // 按员工工号分组社保数据
-    const employeeSocialMap = new Map<string, Record<string, unknown>[]>();
-    employeeSocialData?.forEach((record: Record<string, unknown>) => {
-      const empId = record.员工工号 as string;
-      if (!employeeSocialMap.has(empId)) {
-        employeeSocialMap.set(empId, []);
+
+
+    // 直接遍历每条社保记录进行比例检查
+    employeeSocialData?.forEach((empRecord: Record<string, unknown>) => {
+      const empId = empRecord.员工工号 as string;
+      const empName = empRecord.姓名 as string; // 直接使用社保记录中的姓名
+      const empStartTime = empRecord.开始时间 as string;
+      const empEndTime = empRecord.结束时间 as string;
+      const empCity = empRecord.缴交地 as string;
+      const empType = empRecord.险种类型 as string;
+      const empPersonalRatio = empRecord.个人缴交比例 as number;
+
+      // 处理姓名可能分开存储的情况
+      const empSurname = empRecord.姓 as string;
+      const empGivenName = empRecord.名 as string;
+      const fullName = empName || `${empSurname || ''}${empGivenName || ''}`;
+
+      // 跳过非个人缴费险种
+      const standardizedType = standardizeInsuranceType(empType);
+      
+      if (!requiredInsuranceTypes.includes(standardizedType)) {
+        return; // 跳过非个人缴费险种
       }
-      employeeSocialMap.get(empId)!.push(record);
-    });
 
-    // 遍历每个员工
-    employeeBasicData?.forEach((employee: Record<string, unknown>) => {
-      const empId = employee.员工工号 as string;
-      const empName = `${employee.姓}${employee.名}`;
-      const empSocialRecords = employeeSocialMap.get(empId) || [];
+      // 使用模糊匹配查找标准配置
+      const matchingStandard = findMatchingStandard(empRecord, cityStandardData || []);
 
-      // 1. 检查险种完整性
-      const empInsuranceTypes = new Set(
-        empSocialRecords.map(record => standardizeInsuranceType(record.类型 as string))
-      );
+      if (matchingStandard) {
+        const stdPersonalRatio = matchingStandard.个人缴费比例 as number;
 
-      requiredInsuranceTypes.forEach(requiredType => {
-        if (!empInsuranceTypes.has(requiredType)) {
+        // 比较个人缴费比例（处理数字精度问题）
+        const empRatio = Number(empPersonalRatio);
+        const stdRatio = Number(stdPersonalRatio);
+
+        if (Math.abs(empRatio - stdRatio) > 0.0001) { // 允许微小的精度误差
           issues.push({
             员工工号: empId,
-            姓名: empName,
-            问题描述: `该员工缺少${requiredType}缴纳记录`
-          });
-        }
-      });
-
-      // 2. 检查现有记录的比例准确性
-      empSocialRecords.forEach((empRecord: Record<string, unknown>) => {
-        const empStartTime = empRecord.开始时间 as string;
-        const empEndTime = empRecord.结束时间 as string;
-        const empCity = empRecord.缴交地 as string;
-        const empType = empRecord.类型 as string;
-        const empPersonalRatio = empRecord.个人缴交比例 as number;
-
-        // 跳过非个人缴费险种
-        const standardizedType = standardizeInsuranceType(empType);
-        if (!requiredInsuranceTypes.includes(standardizedType)) {
-          return;
-        }
-
-        // 使用模糊匹配查找标准配置
-        const matchingStandard = findMatchingStandard(empRecord, cityStandardData || []);
-
-        if (matchingStandard) {
-          const stdPersonalRatio = matchingStandard.个人缴费比例 as number;
-
-          // 比较个人缴费比例（处理数字精度问题）
-          const empRatio = Number(empPersonalRatio);
-          const stdRatio = Number(stdPersonalRatio);
-
-          if (Math.abs(empRatio - stdRatio) > 0.0001) { // 允许微小的精度误差
-            issues.push({
-              员工工号: empId,
-              姓名: empName,
-              问题描述: `${standardizedType}个人缴费比例不符合标准`,
-              缴交地: empCity,
-              险种类型: standardizedType,
-              实际比例: empRatio,
-              标准比例: stdRatio,
-              时间段: `${empStartTime} 至 ${empEndTime}`
-            });
-          }
-        } else {
-          // 找不到匹配的标准配置
-          issues.push({
-            员工工号: empId,
-            姓名: empName,
-            问题描述: `未找到${empCity}${standardizedType}的标准配置`,
+            姓名: fullName,
+            问题描述: `${standardizedType}个人缴费比例不符合标准`,
             缴交地: empCity,
             险种类型: standardizedType,
-            实际比例: empPersonalRatio,
-            标准比例: 0,
+            实际比例: empRatio,
+            标准比例: stdRatio,
             时间段: `${empStartTime} 至 ${empEndTime}`
           });
         }
-      });
+      } else {
+        // 找不到匹配的标准配置
+        issues.push({
+          员工工号: empId,
+          姓名: fullName,
+          问题描述: `未找到${empCity}${standardizedType}的标准配置`,
+          缴交地: empCity,
+          险种类型: standardizedType,
+          实际比例: empPersonalRatio,
+          标准比例: 0,
+          时间段: `${empStartTime} 至 ${empEndTime}`
+        });
+      }
     });
 
     console.log('社保缴纳问题总数:', issues.length);
@@ -358,6 +362,146 @@ export default function ComplianceChecker() {
       type: 'contribution_ratio_compliance',
       title: '员工社保缴纳比例一致性检查',
       level: issues.length > 0 ? 'high' : 'low',
+      count: issues.length,
+      details: issues
+    };
+  };
+
+  // 检查3：员工社保记录项目完整性检查
+  const checkSocialInsuranceCompleteness = async (): Promise<CheckResult> => {
+    console.log('🔍 开始检查员工社保记录项目完整性...');
+
+    // 查询所有员工社保数据
+    const { data: employeeSocialData, error: empSocialError } = await supabase
+      .from(TABLE_NAMES.EMPLOYEE_SOCIAL_INSURANCE)
+      .select('*');
+
+    if (empSocialError) {
+      console.error('❌ 查询员工社保数据失败:', empSocialError);
+      throw empSocialError;
+    }
+
+    console.log('📊 员工社保数据条数:', employeeSocialData?.length);
+
+    // 需要检查的四个基本险种（个人缴纳）
+    const requiredInsuranceTypes = ['养老保险', '医疗保险', '失业保险', '公积金'];
+
+    // 按员工工号和年度分组
+    const employeeYearlyData: Record<string, Record<string, Set<string>>> = {};
+    const employeeNames: Record<string, string> = {};
+
+    // 获取社保年度函数（7.1-6.30）
+    const getSocialInsuranceYear = (dateStr: string): string => {
+      try {
+        const date = new Date(normalizeDate(dateStr));
+        const year = date.getFullYear();
+        const month = date.getMonth() + 1; // getMonth() 返回 0-11
+        const day = date.getDate();
+        
+        // 社保年度定义：X年度 = X年7月1日 到 X+1年6月30日
+        // 例如：2022年度 = 2022年7月1日 到 2023年6月30日
+        if (month >= 7) {
+          // 7月1日及以后，属于当年度
+          return `${year}年度`;
+        } else {
+          // 1月1日到6月30日，属于上一年度
+          return `${year - 1}年度`;
+        }
+      } catch {
+        return '未知年度';
+      }
+    };
+
+    // 处理员工社保数据
+    employeeSocialData?.forEach((record: Record<string, unknown>) => {
+      const empId = record.员工工号 as string;
+      const empName = record.姓名 as string;
+      const empSurname = record.姓 as string;
+      const empGivenName = record.名 as string;
+      const startTime = record.开始时间 as string;
+      const insuranceType = standardizeInsuranceType(record.险种类型 as string);
+
+      // 处理姓名
+      const fullName = empName || `${empSurname || ''}${empGivenName || ''}`;
+      employeeNames[empId] = fullName;
+
+      // 使用数据库中的年度字段，如果没有则计算社保年度
+      const year = record.年度 ? `${record.年度}年度` : getSocialInsuranceYear(startTime);
+
+      // 初始化数据结构
+      if (!employeeYearlyData[empId]) {
+        employeeYearlyData[empId] = {};
+      }
+      if (!employeeYearlyData[empId][year]) {
+        employeeYearlyData[empId][year] = new Set();
+      }
+
+      // 只记录四个基本险种
+      if (requiredInsuranceTypes.includes(insuranceType)) {
+        employeeYearlyData[empId][year].add(insuranceType);
+      }
+    });
+
+    console.log('📋 员工年度数据统计:', Object.keys(employeeYearlyData).length, '个员工');
+
+    // 检查每个员工每个年度的险种完整性
+    const issues: Array<{
+      员工工号: string;
+      姓名: string;
+      问题描述: string;
+      年度?: string;
+      缺失项目?: string[];
+    }> = [];
+
+    // 定义需要检查的年度范围（2022-2024）
+    const targetYears = ['2022年度', '2023年度', '2024年度'];
+
+    // 只检查在社保表中出现的员工
+    Object.keys(employeeNames).forEach(empId => {
+      const empName = employeeNames[empId] || '未知姓名';
+      
+      targetYears.forEach(year => {
+        const existingTypes = employeeYearlyData[empId]?.[year] ? Array.from(employeeYearlyData[empId][year]) : [];
+        const missingTypes = requiredInsuranceTypes.filter(type => !existingTypes.includes(type));
+        
+        if (missingTypes.length > 0) {
+          issues.push({
+            员工工号: empId,
+            姓名: empName,
+            问题描述: `${year}缺少${missingTypes.length}个险种项目：${missingTypes.join('、')}`,
+            年度: year,
+            缺失项目: missingTypes
+          });
+        }
+      });
+    });
+
+    // 添加调试信息
+    console.log('🔍 项目完整性检查调试信息:');
+    console.log(`  - 检查的员工总数: ${Object.keys(employeeNames).length}`);
+    console.log(`  - 检查的年度: ${targetYears.join(', ')}`);
+    console.log(`  - 有社保记录的员工: ${Object.keys(employeeYearlyData).length}`);
+    
+    // 特别检查几个目标员工
+    const targetEmployees = ['80000001', '80000014', '80000003', '80000053'];
+    targetEmployees.forEach(empId => {
+      if (employeeNames[empId]) {
+        console.log(`📋 ${empId} ${employeeNames[empId]}:`);
+        targetYears.forEach(year => {
+          const types = employeeYearlyData[empId]?.[year] ? Array.from(employeeYearlyData[empId][year]) : [];
+          console.log(`  - ${year}: ${types.length > 0 ? types.join(', ') : '无记录'}`);
+        });
+      }
+    });
+
+    console.log('🔍 项目完整性检查结果:');
+    console.log(`  - 总问题数: ${issues.length}`);
+    console.log(`  - 问题详情:`, issues.slice(0, 5));
+
+    return {
+      type: 'social_insurance_item_completeness',
+      title: '员工社保记录项目完整性检查',
+      level: issues.length > 0 ? 'medium' : 'low',
       count: issues.length,
       details: issues
     };
@@ -409,6 +553,23 @@ export default function ComplianceChecker() {
     }
   };
 
+  // 执行检查3：员工社保记录项目完整性检查
+  const executeCheck3 = async () => {
+    setChecking3(true);
+    setResults([]);
+    setSelectedResult(null);
+
+    try {
+      const result = await checkSocialInsuranceCompleteness();
+      setResults([result]);
+      console.log('员工社保记录项目完整性检查完成:', result);
+    } catch (error) {
+      console.error('员工社保记录项目完整性检查失败:', error);
+    } finally {
+      setChecking3(false);
+    }
+  };
+
   // 执行所有检查
   const executeAllChecks = async () => {
     setChecking(true);
@@ -424,7 +585,10 @@ export default function ComplianceChecker() {
       // 执行检查2：缴费比例合规性
       const contributionRatioResult = await checkContributionRatioCompliance();
 
-      const allResults = [socialInsuranceResult, contributionRatioResult];
+      // 执行检查3：社保记录项目完整性
+      const socialInsuranceCompletenessResult = await checkSocialInsuranceCompleteness();
+
+      const allResults = [socialInsuranceResult, contributionRatioResult, socialInsuranceCompletenessResult];
 
       setResults(allResults);
       console.log('检查完成，结果:', allResults);
@@ -510,7 +674,7 @@ export default function ComplianceChecker() {
             <CardContent>
               <div className="flex items-center justify-between">
                 <div className="text-sm text-gray-600">
-                  检查员工是否具备4项基本险种记录，并对比实际缴费比例与城市标准配置
+                  检查员工实际缴费比例与城市标准配置是否一致
                 </div>
                 <Button
                   onClick={() => executeCheck2()}
@@ -518,6 +682,40 @@ export default function ComplianceChecker() {
                   className="bg-orange-600 hover:bg-orange-700"
                 >
                   {checking2 ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      检查中...
+                    </>
+                  ) : (
+                    <>
+                      <Search className="h-4 w-4 mr-2" />
+                      执行检查
+                    </>
+                  )}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* 第三个检查：员工社保记录项目完整性检查 */}
+          <Card className="border border-gray-200">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <CheckCircle className="h-5 w-5 text-blue-600" />
+                员工社保记录项目完整性检查
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between">
+                <div className="text-sm text-gray-600">
+                  检查每个员工每个年度是否具备完整的4项基本险种记录
+                </div>
+                <Button
+                  onClick={() => executeCheck3()}
+                  disabled={checking3}
+                  className="bg-blue-600 hover:bg-blue-700"
+                >
+                  {checking3 ? (
                     <>
                       <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
                       检查中...
@@ -641,6 +839,12 @@ export default function ComplianceChecker() {
                             <TableHead>时间段</TableHead>
                           </>
                         )}
+                        {selectedResult.type === 'social_insurance_item_completeness' && (
+                          <>
+                            <TableHead>年度</TableHead>
+                            <TableHead>缺失项目</TableHead>
+                          </>
+                        )}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -666,6 +870,14 @@ export default function ComplianceChecker() {
                               <TableCell className="text-sm">{detail.时间段 || '-'}</TableCell>
                             </>
                           )}
+                          {selectedResult.type === 'social_insurance_item_completeness' && (
+                            <>
+                              <TableCell>{detail.年度 || '-'}</TableCell>
+                              <TableCell className="text-red-600">
+                                {detail.缺失项目 ? detail.缺失项目.join('、') : '-'}
+                              </TableCell>
+                            </>
+                          )}
                         </TableRow>
                       ))}
                     </TableBody>
@@ -687,6 +899,7 @@ export default function ComplianceChecker() {
             <div className="space-y-2 text-sm text-gray-600">
               <p>• <strong>已实现 - 员工社保记录完整性检查</strong>：检查所有员工是否都有社保缴纳记录</p>
               <p>• <strong>已实现 - 员工社保缴纳比例一致性检查</strong>：检查险种完整性（4项基本险种）+ 比例准确性（支持模糊匹配）</p>
+              <p>• <strong>已实现 - 员工社保记录项目完整性检查</strong>：按社保年度检查每个员工是否具备完整的4项基本险种记录</p>
               <p>• <strong>开发中 - 员工与组织匹配性检查</strong>：验证员工与组织架构匹配关系</p>
               <p>• <strong>开发中 - 缴费基数合规性检查</strong>：检查缴费基数是否在标准范围内</p>
               <p>• <strong>开发中 - 缴费记录时效性检查</strong>：验证缴费记录的时效性</p>

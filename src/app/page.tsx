@@ -92,7 +92,7 @@ export default function Home() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="p-4 border rounded-lg bg-green-50 border-green-200">
                     <h3 className="font-medium mb-2 text-green-800">员工社保记录完整性检查</h3>
                     <p className="text-sm text-gray-600 mb-3">
@@ -101,40 +101,24 @@ export default function Home() {
                     </p>
                     <div className="flex items-center justify-between">
                       <Badge variant="secondary" className="bg-green-100 text-green-800">已实现</Badge>
-                      <Button variant="outline" size="sm" className="border-green-300 text-green-700">查看详情</Button>
                     </div>
                   </div>
                   <div className="p-4 border rounded-lg bg-orange-50 border-orange-200">
                     <h3 className="font-medium mb-2 text-orange-800">员工社保缴纳比例一致性检查</h3>
                     <p className="text-sm text-gray-600 mb-3">
-                      <strong>险种完整性：</strong>检查员工是否具备养老、医疗、失业、公积金4项基本险种记录；<br/>
-                      <strong>比例准确性：</strong>对比员工实际缴费比例与城市标准配置，支持模糊匹配（城市名称、险种名称、时间段）。
+                      检查员工实际缴费比例与城市标准配置是否一致。
                     </p>
                     <div className="flex items-center justify-between">
                       <Badge variant="secondary" className="bg-orange-100 text-orange-800">已实现</Badge>
-                      <Button variant="outline" size="sm" className="border-orange-300 text-orange-700">查看详情</Button>
                     </div>
                   </div>
-                  <div className="p-4 border rounded-lg">
-                    <h3 className="font-medium mb-2">员工与组织匹配性检查</h3>
+                  <div className="p-4 border rounded-lg bg-blue-50 border-blue-200">
+                    <h3 className="font-medium mb-2 text-blue-800">员工社保记录项目完整性检查</h3>
                     <p className="text-sm text-gray-600 mb-3">
-                      验证【组织-岗位-人员架构数据】表中的员工与组织架构的匹配关系，
-                      检查员工是否属于正确的组织和岗位。
+                      检查每个员工每个年度是否具备完整的4项基本险种记录。
                     </p>
                     <div className="flex items-center justify-between">
-                      <Badge variant="secondary">开发中</Badge>
-                      <Button variant="outline" size="sm">配置</Button>
-                    </div>
-                  </div>
-                  <div className="p-4 border rounded-lg">
-                    <h3 className="font-medium mb-2">缴费基数合规性检查</h3>
-                    <p className="text-sm text-gray-600 mb-3">
-                      检查员工缴费基数是否在城市标准配置的最低缴费基数和最高缴费基数范围内，
-                      确保符合当地政策要求。
-                    </p>
-                    <div className="flex items-center justify-between">
-                      <Badge variant="secondary">开发中</Badge>
-                      <Button variant="outline" size="sm">配置</Button>
+                      <Badge variant="secondary" className="bg-blue-100 text-blue-800">已实现</Badge>
                     </div>
                   </div>
                 </div>

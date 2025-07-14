@@ -89,7 +89,7 @@ export default function DataImport() {
       '身高', '体重'
     ],
     [TABLE_NAMES.EMPLOYEE_SOCIAL_INSURANCE]: [
-      '员工工号', '姓', '名', '年度', '开始时间', '结束时间', '类型', '缴交地', '缴交基数',
+      '员工工号', '姓', '名', '年度', '开始时间', '结束时间', '险种类型', '缴交地', '缴交基数',
       '个人缴交比例', '公司缴交比例'
     ],
     [TABLE_NAMES.CITY_STANDARDS]: [
@@ -143,30 +143,83 @@ export default function DataImport() {
         } else if (key.toUpperCase() === 'ID') {
           // 处理各种形式的ID字段
           dbKey = 'id';
+        } else if (key === '险种' || key === '保险类型' || key === '类型') {
+          // 将Excel中的险种相关列名映射到数据库的'险种类型'字段
+          dbKey = '险种类型';
+          console.log(`字段名映射: ${key} -> ${dbKey}`);
         }
 
         // 处理数据类型转换
         let value = row[key];
 
-        // 处理日期字段 - Excel日期序列号转换
-        if (dbKey === '生效日期' || dbKey === '失效日期' ||
-            dbKey === '开始时间' || dbKey === '结束时间' ||
-            dbKey === '生效开始时间' || dbKey === '生效结束时间' ||
-            dbKey === '出生日期' || dbKey === '入职日期') {
-
+        // 处理日期字段 - 开始时间和结束时间作为文本处理，避免Excel转换问题
+        if (dbKey === '开始时间' || dbKey === '结束时间') {
+          // 开始时间和结束时间直接作为文本处理，不进行日期转换
+          if (typeof value === 'number') {
+            // 如果是数字，转换为字符串保存
+            value = value.toString();
+          } else if (typeof value === 'string' && value !== '') {
+            // 如果是字符串，直接保存
+            value = value.trim();
+          }
+        } else if (dbKey === '生效日期' || dbKey === '失效日期' ||
+                   dbKey === '生效开始时间' || dbKey === '生效结束时间' ||
+                   dbKey === '出生日期' || dbKey === '入职日期') {
+          // 其他日期字段仍然进行Excel日期序列号转换
           if (typeof value === 'number' && value > 1000) {
-            // Excel日期序列号转换 (1900年1月1日为基准)
-            const excelEpoch = new Date(1900, 0, 1);
-            const jsDate = new Date(excelEpoch.getTime() + (value - 2) * 24 * 60 * 60 * 1000);
-            value = jsDate.toISOString().split('T')[0]; // YYYY-MM-DD格式
-          } else if (typeof value === 'string' && value !== '' && !isNaN(Number(value))) {
-            // 如果是字符串数字，也按Excel序列号处理
-            const numValue = Number(value);
-            if (numValue > 1000) {
-              const excelEpoch = new Date(1900, 0, 1);
-              const jsDate = new Date(excelEpoch.getTime() + (numValue - 2) * 24 * 60 * 60 * 1000);
-              value = jsDate.toISOString().split('T')[0];
-            }
+             // Excel日期序列号转换 (正确处理Excel的1900年闰年bug)
+             // Excel的日期系统：1900年1月1日是序列号1
+             // 但Excel错误地认为1900年是闰年，所以1900年3月1日之后的日期都偏移了1天
+             const baseDate = new Date(1900, 0, 1); // 1900年1月1日
+             let dayOffset = value - 1;
+             
+             // 如果Excel序列号大于等于60（对应1900年2月29日），需要减1天
+             // 因为1900年实际上不是闰年，但Excel认为是
+             if (value >= 60) {
+               dayOffset = dayOffset - 1;
+             }
+             
+             const jsDate = new Date(baseDate.getTime() + dayOffset * 24 * 60 * 60 * 1000);
+             value = jsDate.toISOString().split('T')[0]; // YYYY-MM-DD格式
+          } else if (typeof value === 'string' && value !== '') {
+            // 处理特殊格式如 2023-701 (表示2023年7月1日)
+            if (/^\d{4}-\d{3}$/.test(value)) {
+              const parts = value.split('-');
+              const year = parts[0];
+              const monthDay = parts[1];
+              if (monthDay.length === 3) {
+                // 对于701这种格式，可能是7月01日或者7月1日
+                // 先尝试按7月01日解析
+                let month = monthDay.substring(0, 1);
+                let day = monthDay.substring(1);
+                
+                // 如果日期部分是01-09，则是正确的
+                // 如果日期部分大于31，则可能是错误格式，尝试其他解析
+                if (parseInt(day) > 31) {
+                  // 可能是MMdd格式，如701表示7月1日
+                  month = monthDay.substring(0, 1);
+                  day = monthDay.substring(1);
+                  // 移除前导零
+                  day = parseInt(day).toString();
+                }
+                
+                value = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+              }
+            } else if (!isNaN(Number(value))) {
+               // 如果是字符串数字，也按Excel序列号处理
+                const numValue = Number(value);
+                if (numValue > 1000) {
+                  const baseDate = new Date(1900, 0, 1);
+                  let dayOffset = numValue - 1;
+                  
+                  if (numValue >= 60) {
+                    dayOffset = dayOffset - 1;
+                  }
+                  
+                  const jsDate = new Date(baseDate.getTime() + dayOffset * 24 * 60 * 60 * 1000);
+                  value = jsDate.toISOString().split('T')[0];
+                }
+             }
           }
         } else {
           // 非日期字段的数字转换
