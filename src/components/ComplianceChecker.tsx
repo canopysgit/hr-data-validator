@@ -516,7 +516,7 @@ export default function ComplianceChecker() {
     // 获取员工社保数据
     const { data: socialData, error: socialError } = await supabase
       .from(TABLE_NAMES.EMPLOYEE_SOCIAL_INSURANCE)
-      .select('员工工号, 姓, 名, 开始时间, 结束时间, 缴交地');
+      .select('*');
 
     if (socialError) {
       console.error('查询员工社保数据失败:', socialError);
@@ -526,7 +526,7 @@ export default function ComplianceChecker() {
     // 获取员工合同数据
     const { data: contractData, error: contractError } = await supabase
       .from(TABLE_NAMES.EMPLOYEE_CONTRACTS)
-      .select('员工工号, 姓, 名, 开始日期, 结束日期, 劳动合同主体, 劳动合同主体所在城市');
+      .select('*');
 
     if (contractError) {
       console.error('查询员工合同数据失败:', contractError);
@@ -576,20 +576,20 @@ export default function ComplianceChecker() {
     }> = [];
 
     // 处理每条社保记录
-    socialData?.forEach((socialRecord: any) => {
-      const empId = socialRecord.员工工号;
+    socialData?.forEach((socialRecord: Record<string, unknown>) => {
+      const empId = socialRecord.员工工号 as string;
       const empName = `${socialRecord.姓 || ''}${socialRecord.名 || ''}`;
-      const paymentLocation = socialRecord.缴交地;
+      const paymentLocation = socialRecord.缴交地 as string;
       
       // 首先尝试精确时间段匹配
-      const socialStart = normalizeDate(socialRecord.开始时间);
-      const socialEnd = normalizeDate(socialRecord.结束时间);
+      const socialStart = normalizeDate(socialRecord.开始时间 as string);
+      const socialEnd = normalizeDate(socialRecord.结束时间 as string);
       
-      const exactMatches = (contractData || []).filter(contract => {
-         if (String(contract.员工工号) !== String(empId)) return false;
+      const exactMatches = (contractData || []).filter((contract: Record<string, unknown>) => {
+         if (String((contract as Record<string, unknown>).员工工号) !== String(empId)) return false;
         
-        const contractStart = normalizeDate(contract.开始日期);
-        const contractEnd = normalizeDate(contract.结束日期);
+        const contractStart = normalizeDate(contract.开始日期 as string);
+        const contractEnd = normalizeDate(contract.结束日期 as string);
         
         return isTimeOverlap(
           { start: socialStart, end: socialEnd },
@@ -602,7 +602,7 @@ export default function ComplianceChecker() {
       
       // 如果没有精确匹配，使用备选匹配策略
       if (exactMatches.length === 0) {
-        const employeeContracts = (contractData || []).filter(contract => String(contract.员工工号) === String(empId));
+        const employeeContracts = (contractData || []).filter((contract: Record<string, unknown>) => String(contract.员工工号) === String(empId));
         
         if (employeeContracts.length === 0) {
           // 完全没有找到该员工的合同记录
@@ -679,7 +679,7 @@ export default function ComplianceChecker() {
     return {
       type: 'payment_location_consistency',
       title: '员工缴纳地一致性检查',
-      level: issues.length > 0 ? 'high' : 'low',
+      level: (issues.length > 0 ? 'high' : 'low') as 'high' | 'medium' | 'low',
       count: issues.length,
       details: issues
     };

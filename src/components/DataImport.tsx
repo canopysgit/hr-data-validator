@@ -36,6 +36,7 @@ const SHEET_TABLE_MAPPING = {
   '日期说明': TABLE_NAMES.EMPLOYEE_DATES,
   '城市社保标准配置表': TABLE_NAMES.CITY_STANDARDS,
   '员工合同信息': TABLE_NAMES.EMPLOYEE_CONTRACTS,
+  '工资核算结果信息': TABLE_NAMES.SALARY_CALCULATION_RESULTS,
 };
 
 export default function DataImport() {
@@ -113,6 +114,10 @@ export default function DataImport() {
       '员工工号', '姓', '名', '开始日期', '结束日期', '签订日期',
       '合同类型', '劳动合同主体', '劳动合同主体所在城市', '合同期限类型', '是否竞业协议',
       '劳动合同状态', '签署类型', '签署年限'
+    ],
+    [TABLE_NAMES.SALARY_CALCULATION_RESULTS]: [
+      'employee_id', 'last_name', 'first_name', 'start_date', 'end_date',
+      'salary_item_code', 'salary_item_name', 'amount', 'currency'
     ]
   };
 
@@ -165,6 +170,26 @@ export default function DataImport() {
           // 处理备注字段的各种可能名称
           dbKey = '备注';
           console.log(`字段名映射: ${key} -> ${dbKey}`);
+        } else if (tableName === TABLE_NAMES.SALARY_CALCULATION_RESULTS) {
+          // 工资核算结果信息表的字段映射
+          if (key === '员工工号') {
+            dbKey = 'employee_id';
+          } else if (key === '姓') {
+            dbKey = 'last_name';
+          } else if (key === '名') {
+            dbKey = 'first_name';
+          } else if (key === '开始时间') {
+            dbKey = 'start_date';
+          } else if (key === '结束时间') {
+            dbKey = 'end_date';
+          } else if (key === '工资项名称') {
+            dbKey = 'salary_item_name';
+          } else if (key === '金额') {
+            dbKey = 'amount';
+          } else if (key === '币种') {
+            dbKey = 'currency';
+          }
+          console.log(`工资表字段映射: ${key} -> ${dbKey}`);
         }
 
         // 处理数据类型转换
@@ -183,7 +208,8 @@ export default function DataImport() {
         } else if (dbKey === '生效日期' || dbKey === '失效日期' ||
                    dbKey === '生效开始时间' || dbKey === '生效结束时间' ||
                    dbKey === '出生日期' || dbKey === '入职日期' ||
-                   dbKey === '开始日期' || dbKey === '结束日期' || dbKey === '签订日期') {
+                   dbKey === '开始日期' || dbKey === '结束日期' || dbKey === '签订日期' ||
+                   dbKey === 'start_date' || dbKey === 'end_date') {
           // 其他日期字段仍然进行Excel日期序列号转换
           if (typeof value === 'number' && value > 1000) {
              // Excel日期序列号转换 (正确处理Excel的1900年闰年bug)

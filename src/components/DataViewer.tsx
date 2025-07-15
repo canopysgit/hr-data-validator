@@ -58,6 +58,11 @@ const tableConfig = [
     tableName: TABLE_NAMES.CITY_STANDARDS,
     displayName: '城市社保标准配置表',
     icon: <Database className="h-4 w-4" />
+  },
+  {
+    tableName: TABLE_NAMES.SALARY_CALCULATION_RESULTS,
+    displayName: '工资核算信息',
+    icon: <FileText className="h-4 w-4" />
   }
 ];
 

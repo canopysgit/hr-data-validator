@@ -14,7 +14,8 @@ export const TABLE_NAMES = {
   EMPLOYEE_DOCUMENTS: 'employee_documents',
   EMPLOYEE_DATES: 'employee_dates',
   CITY_STANDARDS: 'city_social_insurance_standards',
-  EMPLOYEE_CONTRACTS: 'employee_contracts'
+  EMPLOYEE_CONTRACTS: 'employee_contracts',
+  SALARY_CALCULATION_RESULTS: 'salary_calculation_results'
 } as const
 
 // 类型定义
@@ -99,5 +100,19 @@ export type Database = {
     签署类型: string | null
     签署年限: string | null
     created_at: string
+  }
+  salary_calculation_results: {
+    id: number
+    employee_id: string
+    last_name: string | null
+    first_name: string | null
+    start_date: string | null
+    end_date: string | null
+    salary_item_code: string | null
+    salary_item_name: string | null
+    amount: number | null
+    currency: string | null
+    created_at: string
+    updated_at: string
   }
 }
