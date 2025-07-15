@@ -35,6 +35,11 @@ const tableConfig = [
     icon: <Users className="h-4 w-4" />
   },
   {
+    tableName: TABLE_NAMES.EMPLOYEE_CONTRACTS,
+    displayName: '员工合同信息',
+    icon: <FileText className="h-4 w-4" />
+  },
+  {
     tableName: TABLE_NAMES.EMPLOYEE_SOCIAL_INSURANCE,
     displayName: '员工社保信息',
     icon: <FileText className="h-4 w-4" />
@@ -69,6 +74,9 @@ export default function DataViewer() {
   const [tableData, setTableData] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [pageSize] = useState(20); // 每页显示20条记录
 
   const loadTableStats = useCallback(async () => {
     setLoading(true);
@@ -104,15 +112,28 @@ export default function DataViewer() {
     }
   }, []);
 
-  const loadTableData = async (tableName: string) => {
+  const loadTableData = async (tableName: string, page: number = 1) => {
     setLoading(true);
     setError(null);
 
     try {
+      // 获取总数
+      const { count, error: countError } = await supabase
+        .from(tableName)
+        .select('*', { count: 'exact', head: true });
+
+      if (countError) {
+        throw countError;
+      }
+
+      // 获取分页数据
+      const from = (page - 1) * pageSize;
+      const to = from + pageSize - 1;
+
       const { data, error } = await supabase
         .from(tableName)
         .select('*')
-        .limit(50); // 限制显示前50条记录
+        .range(from, to);
 
       if (error) {
         throw error;
@@ -120,6 +141,8 @@ export default function DataViewer() {
 
       setTableData(data || []);
       setSelectedTable(tableName);
+      setTotalCount(count || 0);
+      setCurrentPage(page);
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载表数据失败');
     } finally {
@@ -130,6 +153,14 @@ export default function DataViewer() {
   useEffect(() => {
     loadTableStats();
   }, [loadTableStats]);
+
+  const handlePageChange = (page: number) => {
+    if (selectedTable) {
+      loadTableData(selectedTable, page);
+    }
+  };
+
+  const totalPages = Math.ceil(totalCount / pageSize);
 
   const renderTableData = () => {
     if (tableData.length === 0) {
@@ -156,13 +187,13 @@ export default function DataViewer() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {tableData.slice(0, 10).map((row, index) => (
+            {tableData.map((row, index) => (
               <TableRow key={index}>
                 {columns.map((column) => (
                   <TableCell key={column} className="whitespace-nowrap">
                     {row[column] !== null && row[column] !== undefined
-                      ? String(row[column]).length > 20
-                        ? String(row[column]).substring(0, 20) + '...'
+                      ? String(row[column]).length > 30
+                        ? String(row[column]).substring(0, 30) + '...'
                         : String(row[column])
                       : '-'
                     }
@@ -172,9 +203,50 @@ export default function DataViewer() {
             ))}
           </TableBody>
         </Table>
-        {tableData.length > 10 && (
-          <div className="text-center py-4 text-sm text-gray-500">
-            显示前10条记录，共 {tableData.length} 条
+        
+        {/* 分页控件 */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between mt-4 px-4 py-2 bg-gray-50 rounded-lg">
+            <div className="text-sm text-gray-600">
+              显示第 {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, totalCount)} 条，共 {totalCount} 条记录
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handlePageChange(1)}
+                disabled={currentPage === 1}
+              >
+                首页
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handlePageChange(currentPage - 1)}
+                disabled={currentPage === 1}
+              >
+                上一页
+              </Button>
+              <span className="text-sm text-gray-600 px-2">
+                第 {currentPage} / {totalPages} 页
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handlePageChange(currentPage + 1)}
+                disabled={currentPage === totalPages}
+              >
+                下一页
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handlePageChange(totalPages)}
+                disabled={currentPage === totalPages}
+              >
+                末页
+              </Button>
+            </div>
           </div>
         )}
       </div>
@@ -215,7 +287,10 @@ export default function DataViewer() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {tableStats.map((stat) => (
               <Card key={stat.tableName} className="cursor-pointer hover:shadow-md transition-shadow"
-                    onClick={() => loadTableData(stat.tableName)}>
+                    onClick={() => {
+                      setCurrentPage(1);
+                      loadTableData(stat.tableName, 1);
+                    }}>
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -246,9 +321,16 @@ export default function DataViewer() {
       {selectedTable && (
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Eye className="h-5 w-5 text-green-600" />
-              {tableConfig.find(t => t.tableName === selectedTable)?.displayName} - 数据预览
+            <CardTitle className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Eye className="h-5 w-5 text-green-600" />
+                {tableConfig.find(t => t.tableName === selectedTable)?.displayName} - 数据预览
+              </div>
+              {totalCount > 0 && (
+                <Badge variant="outline" className="text-sm">
+                  共 {totalCount} 条记录
+                </Badge>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent>

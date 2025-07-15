@@ -35,6 +35,7 @@ const SHEET_TABLE_MAPPING = {
   '证件信息': TABLE_NAMES.EMPLOYEE_DOCUMENTS,
   '日期说明': TABLE_NAMES.EMPLOYEE_DATES,
   '城市社保标准配置表': TABLE_NAMES.CITY_STANDARDS,
+  '员工合同信息': TABLE_NAMES.EMPLOYEE_CONTRACTS,
 };
 
 export default function DataImport() {
@@ -107,6 +108,11 @@ export default function DataImport() {
     ],
     [TABLE_NAMES.EMPLOYEE_DATES]: [
       '员工工号', '姓', '名', '日期类型', '日期', '备注'
+    ],
+    [TABLE_NAMES.EMPLOYEE_CONTRACTS]: [
+      '员工工号', '姓', '名', '开始日期', '结束日期', '签订日期',
+      '合同类型', '劳动合同主体', '合同期限类型', '是否竞业协议',
+      '劳动合同状态', '签署类型', '签署年限'
     ]
   };
 
@@ -164,7 +170,8 @@ export default function DataImport() {
           }
         } else if (dbKey === '生效日期' || dbKey === '失效日期' ||
                    dbKey === '生效开始时间' || dbKey === '生效结束时间' ||
-                   dbKey === '出生日期' || dbKey === '入职日期') {
+                   dbKey === '出生日期' || dbKey === '入职日期' ||
+                   dbKey === '开始日期' || dbKey === '结束日期' || dbKey === '签订日期') {
           // 其他日期字段仍然进行Excel日期序列号转换
           if (typeof value === 'number' && value > 1000) {
              // Excel日期序列号转换 (正确处理Excel的1900年闰年bug)
@@ -182,8 +189,19 @@ export default function DataImport() {
              const jsDate = new Date(baseDate.getTime() + dayOffset * 24 * 60 * 60 * 1000);
              value = jsDate.toISOString().split('T')[0]; // YYYY-MM-DD格式
           } else if (typeof value === 'string' && value !== '') {
-            // 处理特殊格式如 2023-701 (表示2023年7月1日)
-            if (/^\d{4}-\d{3}$/.test(value)) {
+            // 处理特殊日期值
+             if (value === '9999-12-31' || value.startsWith('9999-')) {
+               // 将9999开头的日期转换为null，表示无结束日期或永久有效
+               value = null;
+             } else if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+               // 验证标准日期格式并检查范围
+               const dateObj = new Date(value);
+               const year = dateObj.getFullYear();
+               if (year > 2100 || year < 1900) {
+                 // 超出合理范围的年份设为null
+                 value = null;
+               }
+             } else if (/^\d{4}-\d{3}$/.test(value)) {
               const parts = value.split('-');
               const year = parts[0];
               const monthDay = parts[1];

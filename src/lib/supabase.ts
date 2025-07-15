@@ -13,7 +13,8 @@ export const TABLE_NAMES = {
   EMPLOYEE_SOCIAL_INSURANCE: 'employee_social_insurance',
   EMPLOYEE_DOCUMENTS: 'employee_documents',
   EMPLOYEE_DATES: 'employee_dates',
-  CITY_STANDARDS: 'city_social_insurance_standards'
+  CITY_STANDARDS: 'city_social_insurance_standards',
+  EMPLOYEE_CONTRACTS: 'employee_contracts'
 } as const
 
 // 类型定义
@@ -80,6 +81,23 @@ export type Database = {
     缴交基数: number | null
     个人缴交比例: number | null
     公司缴交比例: number | null
+    created_at: string
+  }
+  employee_contracts: {
+    id: number
+    员工工号: number | null
+    姓: string | null
+    名: string | null
+    开始日期: string | null
+    结束日期: string | null
+    签订日期: string | null
+    合同类型: string | null
+    劳动合同主体: string | null
+    合同期限类型: string | null
+    是否竞业协议: string | null
+    劳动合同状态: string | null
+    签署类型: string | null
+    签署年限: string | null
     created_at: string
   }
 }
