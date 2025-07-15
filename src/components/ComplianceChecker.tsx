@@ -32,6 +32,7 @@ interface CheckResult {
     时间段?: string;
     年度?: string;
     缺失项目?: string[];
+    合同城市?: string;
   }>;
 }
 
@@ -40,6 +41,7 @@ export default function ComplianceChecker() {
   const [checking1, setChecking1] = useState(false);
   const [checking2, setChecking2] = useState(false);
   const [checking3, setChecking3] = useState(false);
+  const [checking4, setChecking4] = useState(false);
   const [results, setResults] = useState<CheckResult[]>([]);
   const [selectedResult, setSelectedResult] = useState<CheckResult | null>(null);
 
@@ -507,6 +509,182 @@ export default function ComplianceChecker() {
     };
   };
 
+  // 检查4：员工缴纳地一致性检查
+  const checkPaymentLocationConsistency = async () => {
+    console.log('🔍 开始员工缴纳地一致性检查...');
+
+    // 获取员工社保数据
+    const { data: socialData, error: socialError } = await supabase
+      .from(TABLE_NAMES.EMPLOYEE_SOCIAL_INSURANCE)
+      .select('员工工号, 姓, 名, 开始时间, 结束时间, 缴交地');
+
+    if (socialError) {
+      console.error('查询员工社保数据失败:', socialError);
+      throw socialError;
+    }
+
+    // 获取员工合同数据
+    const { data: contractData, error: contractError } = await supabase
+      .from(TABLE_NAMES.EMPLOYEE_CONTRACTS)
+      .select('员工工号, 姓, 名, 开始日期, 结束日期, 劳动合同主体, 劳动合同主体所在城市');
+
+    if (contractError) {
+      console.error('查询员工合同数据失败:', contractError);
+      throw contractError;
+    }
+
+    console.log(`📊 社保数据: ${socialData?.length || 0} 条记录`);
+    console.log(`📊 合同数据: ${contractData?.length || 0} 条记录`);
+
+    // 城市名称标准化函数
+    const normalizeCityName = (cityName: string): string => {
+      if (!cityName) return '';
+      return cityName.replace(/市$|地区$|区$/g, '').trim().toLowerCase();
+    };
+
+    // 日期标准化函数
+    const normalizeDate = (dateStr: string): Date | null => {
+      if (!dateStr) return null;
+      try {
+        // 处理各种日期格式
+        const date = new Date(dateStr);
+        return isNaN(date.getTime()) ? null : date;
+      } catch {
+        return null;
+      }
+    };
+
+    // 检查时间段是否重叠
+    const isTimeOverlap = (period1: {start: Date | null, end: Date | null}, period2: {start: Date | null, end: Date | null}): boolean => {
+      if (!period1.start || !period2.start) return false;
+      
+      const p1End = period1.end || new Date('2099-12-31');
+      const p2End = period2.end || new Date('2099-12-31');
+      
+      return period1.start <= p2End && period2.start <= p1End;
+    };
+
+
+
+    const issues: Array<{
+      员工工号: string;
+      姓名: string;
+      问题描述: string;
+      缴交地?: string;
+      合同城市?: string;
+      时间段?: string;
+    }> = [];
+
+    // 处理每条社保记录
+    socialData?.forEach((socialRecord: any) => {
+      const empId = socialRecord.员工工号;
+      const empName = `${socialRecord.姓 || ''}${socialRecord.名 || ''}`;
+      const paymentLocation = socialRecord.缴交地;
+      
+      // 首先尝试精确时间段匹配
+      const socialStart = normalizeDate(socialRecord.开始时间);
+      const socialEnd = normalizeDate(socialRecord.结束时间);
+      
+      const exactMatches = (contractData || []).filter(contract => {
+         if (String(contract.员工工号) !== String(empId)) return false;
+        
+        const contractStart = normalizeDate(contract.开始日期);
+        const contractEnd = normalizeDate(contract.结束日期);
+        
+        return isTimeOverlap(
+          { start: socialStart, end: socialEnd },
+          { start: contractStart, end: contractEnd }
+        );
+      });
+      
+      let matchingContracts = exactMatches;
+      let isExactMatch = true;
+      
+      // 如果没有精确匹配，使用备选匹配策略
+      if (exactMatches.length === 0) {
+        const employeeContracts = (contractData || []).filter(contract => String(contract.员工工号) === String(empId));
+        
+        if (employeeContracts.length === 0) {
+          // 完全没有找到该员工的合同记录
+          issues.push({
+            员工工号: empId,
+            姓名: empName,
+            问题描述: '未找到该员工的任何劳动合同记录',
+            缴交地: paymentLocation,
+            时间段: `${socialRecord.开始时间} - ${socialRecord.结束时间}`
+          });
+          return;
+        }
+        
+        // 选择最新的合同记录作为备选
+        const sortedContracts = employeeContracts.sort((a, b) => {
+          const dateA = normalizeDate(a.开始日期);
+          const dateB = normalizeDate(b.开始日期);
+          if (!dateA && !dateB) return 0;
+          if (!dateA) return 1;
+          if (!dateB) return -1;
+          return dateB.getTime() - dateA.getTime();
+        });
+        
+        matchingContracts = [sortedContracts[0]];
+        isExactMatch = false;
+      }
+      
+      // 检查每个匹配的合同
+      matchingContracts.forEach(contract => {
+        const contractCity = contract.劳动合同主体所在城市;
+        
+        if (!contractCity) {
+          // 合同城市字段为空
+          const problemDesc = isExactMatch 
+            ? '劳动合同主体所在城市字段为空'
+            : '时间段不匹配，使用最新合同检查，但劳动合同主体所在城市字段为空';
+          
+          issues.push({
+            员工工号: empId,
+            姓名: empName,
+            问题描述: problemDesc,
+            缴交地: paymentLocation,
+            合同城市: contractCity,
+            时间段: `${socialRecord.开始时间} - ${socialRecord.结束时间}`
+          });
+          return;
+        }
+        
+        // 城市名称模糊匹配
+        const normalizedPaymentLocation = normalizeCityName(paymentLocation);
+        const normalizedContractCity = normalizeCityName(contractCity);
+        
+        if (normalizedPaymentLocation !== normalizedContractCity) {
+          // 城市不一致
+          const problemDesc = isExactMatch 
+            ? `缴交地与合同城市不一致：${paymentLocation} ≠ ${contractCity}`
+            : `时间段不匹配，使用最新合同检查，缴交地与合同城市不一致：${paymentLocation} ≠ ${contractCity}`;
+          issues.push({
+            员工工号: empId,
+            姓名: empName,
+            问题描述: problemDesc,
+            缴交地: paymentLocation,
+            合同城市: contractCity,
+            时间段: `${socialRecord.开始时间} - ${socialRecord.结束时间}`
+          });
+        }
+      });
+    });
+
+    console.log('🔍 缴纳地一致性检查结果:');
+    console.log(`  - 总问题数: ${issues.length}`);
+    console.log(`  - 问题详情:`, issues.slice(0, 5));
+
+    return {
+      type: 'payment_location_consistency',
+      title: '员工缴纳地一致性检查',
+      level: issues.length > 0 ? 'high' : 'low',
+      count: issues.length,
+      details: issues
+    };
+  }
+
   // 执行检查1：员工社保记录完整性检查
   const executeCheck1 = async () => {
     setChecking1(true);
@@ -570,6 +748,24 @@ export default function ComplianceChecker() {
     }
   };
 
+  // 执行检查4：员工缴纳地一致性检查
+  const executeCheck4 = async () => {
+    setChecking4(true);
+    setResults([]);
+    setSelectedResult(null);
+
+    try {
+      const result = await checkPaymentLocationConsistency();
+      setResults([result]);
+      setSelectedResult(result);
+      console.log('员工缴纳地一致性检查完成:', result);
+    } catch (error) {
+      console.error('员工缴纳地一致性检查失败:', error);
+    } finally {
+      setChecking4(false);
+    }
+  }
+
   // 执行所有检查
   const executeAllChecks = async () => {
     setChecking(true);
@@ -588,7 +784,10 @@ export default function ComplianceChecker() {
       // 执行检查3：社保记录项目完整性
       const socialInsuranceCompletenessResult = await checkSocialInsuranceCompleteness();
 
-      const allResults = [socialInsuranceResult, contributionRatioResult, socialInsuranceCompletenessResult];
+      // 执行检查4：员工缴纳地一致性
+      const paymentLocationConsistencyResult = await checkPaymentLocationConsistency();
+
+      const allResults = [socialInsuranceResult, contributionRatioResult, socialInsuranceCompletenessResult, paymentLocationConsistencyResult];
 
       setResults(allResults);
       console.log('检查完成，结果:', allResults);
@@ -731,6 +930,40 @@ export default function ComplianceChecker() {
             </CardContent>
           </Card>
 
+          {/* 第四个检查：员工缴纳地一致性检查 */}
+          <Card className="border border-gray-200">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-red-600" />
+                员工缴纳地一致性检查
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between">
+                <div className="text-sm text-gray-600">
+                  检查员工社保缴交地与劳动合同主体所在城市是否一致
+                </div>
+                <Button
+                  onClick={() => executeCheck4()}
+                  disabled={checking4}
+                  className="bg-red-600 hover:bg-red-700"
+                >
+                  {checking4 ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      检查中...
+                    </>
+                  ) : (
+                    <>
+                      <Search className="h-4 w-4 mr-2" />
+                      执行检查
+                    </>
+                  )}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
           {/* 执行所有检查按钮 */}
           <div className="pt-4 border-t">
             <div className="flex items-center justify-between">
@@ -845,6 +1078,13 @@ export default function ComplianceChecker() {
                             <TableHead>缺失项目</TableHead>
                           </>
                         )}
+                        {selectedResult.type === 'payment_location_consistency' && (
+                          <>
+                            <TableHead>缴交地</TableHead>
+                            <TableHead>合同城市</TableHead>
+                            <TableHead>时间段</TableHead>
+                          </>
+                        )}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -875,6 +1115,14 @@ export default function ComplianceChecker() {
                               <TableCell>{detail.年度 || '-'}</TableCell>
                               <TableCell className="text-red-600">
                                 {detail.缺失项目 ? detail.缺失项目.join('、') : '-'}
+                              </TableCell>
+                            </>
+                          )}
+                          {selectedResult.type === 'payment_location_consistency' && (
+                            <>
+                              <TableCell>{detail.缴交地 || '-'}</TableCell>
+                              <TableCell>{detail.合同城市 || '-'}</TableCell>
+                              <TableCell className="text-sm">{detail.时间段 || '-'}
                               </TableCell>
                             </>
                           )}
