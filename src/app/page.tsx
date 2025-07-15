@@ -92,7 +92,7 @@ export default function Home() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="p-4 border rounded-lg bg-green-50 border-green-200">
                     <h3 className="font-medium mb-2 text-green-800">员工社保记录完整性检查</h3>
                     <p className="text-sm text-gray-600 mb-3">
@@ -119,6 +119,15 @@ export default function Home() {
                     </p>
                     <div className="flex items-center justify-between">
                       <Badge variant="secondary" className="bg-blue-100 text-blue-800">已实现</Badge>
+                    </div>
+                  </div>
+                  <div className="p-4 border rounded-lg bg-purple-50 border-purple-200">
+                    <h3 className="font-medium mb-2 text-purple-800">员工缴纳地一致性检查</h3>
+                    <p className="text-sm text-gray-600 mb-3">
+                      检查员工社保缴纳地与签约公司主体所在地是否一致。
+                    </p>
+                    <div className="flex items-center justify-between">
+                      <Badge variant="secondary" className="bg-purple-100 text-purple-800">已实现</Badge>
                     </div>
                   </div>
                 </div>

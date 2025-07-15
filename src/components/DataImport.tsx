@@ -61,7 +61,7 @@ export default function DataImport() {
           Object.keys(SHEET_TABLE_MAPPING).includes(name)
         );
         setSheets(sheetNames);
-        setSelectedSheets(sheetNames); // 默认选择所有相关sheet
+        setSelectedSheets([]); // 初始状态不选择任何sheet，让用户主动选择
       };
       reader.readAsBinaryString(file);
     }
@@ -306,7 +306,14 @@ export default function DataImport() {
   };
 
   const importDataToSupabase = async () => {
-    if (!file || selectedSheets.length === 0) return;
+    if (!file) {
+      alert('请先上传Excel文件');
+      return;
+    }
+    if (selectedSheets.length === 0) {
+      alert('请至少选择一个Sheet进行导入');
+      return;
+    }
 
     setIsImporting(true);
     const progress: ImportProgress[] = selectedSheets.map(sheet => ({
