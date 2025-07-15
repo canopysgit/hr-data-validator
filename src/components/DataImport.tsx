@@ -94,8 +94,8 @@ export default function DataImport() {
       '个人缴交比例', '公司缴交比例'
     ],
     [TABLE_NAMES.CITY_STANDARDS]: [
-      'id', '城市', '年度', '险种类型', '最低缴费基数', '最高缴费基数', '个人缴费比例',
-      '公司缴费比例', '生效日期', '失效日期'
+      'ID', '城市', '年度', '险种类型', '最低缴费基数', '最高缴费基数', '个人缴费比例',
+      '公司缴费比例', '生效日期', '失效日期', '社保年度', '缴费基数生效依据', '缴费比例生效依据', '备注'
     ],
     [TABLE_NAMES.ORG_POSITION_EMPLOYEE]: [
       '序号', '员工工号', '姓', '名', '部门编码', '部门名称', '岗位编码', '岗位名称',
@@ -144,14 +144,26 @@ export default function DataImport() {
         } else if (key === '岗位名称.1') {
           dbKey = '岗位名称_1';
         } else if (key === 'ID') {
-          // 城市社保标准配置表的ID字段映射为小写
-          dbKey = 'id';
+          // 城市社保标准配置表的ID字段映射为大写
+          dbKey = 'ID';
         } else if (key.toUpperCase() === 'ID') {
           // 处理各种形式的ID字段
-          dbKey = 'id';
+          dbKey = 'ID';
         } else if (key === '险种' || key === '保险类型' || key === '类型') {
           // 将Excel中的险种相关列名映射到数据库的'险种类型'字段
           dbKey = '险种类型';
+          console.log(`字段名映射: ${key} -> ${dbKey}`);
+        } else if (key.includes('缴费基数生效依据')) {
+          // 处理可能被截断的'缴费基数生效依据'字段
+          dbKey = '缴费基数生效依据';
+          console.log(`字段名映射: ${key} -> ${dbKey}`);
+        } else if (key.includes('缴费比例生效依据')) {
+          // 处理可能被截断的'缴费比例生效依据'字段
+          dbKey = '缴费比例生效依据';
+          console.log(`字段名映射: ${key} -> ${dbKey}`);
+        } else if (key.includes('备注') || key.toLowerCase().includes('remark') || key.toLowerCase().includes('note')) {
+          // 处理备注字段的各种可能名称
+          dbKey = '备注';
           console.log(`字段名映射: ${key} -> ${dbKey}`);
         }
 
@@ -316,26 +328,51 @@ export default function DataImport() {
                 目标表名: tableName
               });
 
-              // 清除现有数据
-              const { error: deleteError } = await supabase.from(tableName).delete().neq('id', 0);
-              if (deleteError) {
-                console.warn(`清除表 ${tableName} 数据时出现警告:`, deleteError);
+              // 对于城市社保标准配置表，使用UPSERT操作避免主键冲突
+              // 对于其他表，仍然清除现有数据后插入
+              if (tableName === 'city_social_insurance_standards') {
+                console.log(`使用UPSERT操作处理表 ${tableName}，避免主键冲突`);
+              } else {
+                // 清除现有数据
+                const { error: deleteError } = await supabase.from(tableName).delete().neq('id', 0);
+                if (deleteError) {
+                  console.warn(`清除表 ${tableName} 数据时出现警告:`, deleteError);
+                }
               }
 
-              // 分批插入数据 (每批20条，减少批次大小)
+              // 分批处理数据 (每批20条，减少批次大小)
               const batchSize = 20;
               let insertedCount = 0;
 
               for (let j = 0; j < convertedData.length; j += batchSize) {
                 const batch = convertedData.slice(j, j + batchSize);
 
-                console.log(`插入批次 ${Math.floor(j/batchSize) + 1}:`, {
+                console.log(`处理批次 ${Math.floor(j/batchSize) + 1}:`, {
                   表名: tableName,
                   批次大小: batch.length,
+                  操作类型: tableName === 'city_social_insurance_standards' ? 'UPSERT' : 'INSERT',
                   批次数据示例: batch[0]
                 });
 
-                const { error, data: insertData } = await supabase.from(tableName).insert(batch).select();
+                let error, insertData;
+                
+                if (tableName === 'city_social_insurance_standards') {
+                  // 使用UPSERT操作，如果ID存在则更新，不存在则插入
+                  const result = await supabase
+                    .from(tableName)
+                    .upsert(batch, { 
+                      onConflict: 'ID',  // 指定冲突字段
+                      ignoreDuplicates: false  // 不忽略重复，而是更新
+                    })
+                    .select();
+                  error = result.error;
+                  insertData = result.data;
+                } else {
+                  // 使用普通INSERT操作
+                  const result = await supabase.from(tableName).insert(batch).select();
+                  error = result.error;
+                  insertData = result.data;
+                }
 
                 if (error) {
                   console.error(`插入数据到表 ${tableName} 失败:`, {
