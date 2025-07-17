@@ -195,87 +195,102 @@ export default function DataImport() {
         // 处理数据类型转换
         let value = row[key];
 
-        // 处理日期字段 - 开始时间和结束时间作为文本处理，避免Excel转换问题
-        if (dbKey === '开始时间' || dbKey === '结束时间') {
-          // 开始时间和结束时间直接作为文本处理，不进行日期转换
-          if (typeof value === 'number') {
-            // 如果是数字，转换为字符串保存
-            value = value.toString();
-          } else if (typeof value === 'string' && value !== '') {
-            // 如果是字符串，直接保存
-            value = value.trim();
-          }
-        } else if (dbKey === '生效日期' || dbKey === '失效日期' ||
-                   dbKey === '生效开始时间' || dbKey === '生效结束时间' ||
-                   dbKey === '出生日期' || dbKey === '入职日期' ||
-                   dbKey === '开始日期' || dbKey === '结束日期' || dbKey === '签订日期' ||
-                   dbKey === 'start_date' || dbKey === 'end_date') {
-          // 其他日期字段仍然进行Excel日期序列号转换
-          if (typeof value === 'number' && value > 1000) {
-             // Excel日期序列号转换 (正确处理Excel的1900年闰年bug)
-             // Excel的日期系统：1900年1月1日是序列号1
-             // 但Excel错误地认为1900年是闰年，所以1900年3月1日之后的日期都偏移了1天
-             const baseDate = new Date(1900, 0, 1); // 1900年1月1日
-             let dayOffset = value - 1;
-             
-             // 如果Excel序列号大于等于60（对应1900年2月29日），需要减1天
-             // 因为1900年实际上不是闰年，但Excel认为是
-             if (value >= 60) {
-               dayOffset = dayOffset - 1;
-             }
-             
-             const jsDate = new Date(baseDate.getTime() + dayOffset * 24 * 60 * 60 * 1000);
-             value = jsDate.toISOString().split('T')[0]; // YYYY-MM-DD格式
-          } else if (typeof value === 'string' && value !== '') {
-            // 处理特殊日期值
-             if (value === '9999-12-31' || value.startsWith('9999-')) {
-               // 将9999开头的日期转换为null，表示无结束日期或永久有效
-               value = null;
-             } else if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-               // 验证标准日期格式并检查范围
-               const dateObj = new Date(value);
-               const year = dateObj.getFullYear();
-               if (year > 2100 || year < 1900) {
-                 // 超出合理范围的年份设为null
-                 value = null;
-               }
-             } else if (/^\d{4}-\d{3}$/.test(value)) {
-              const parts = value.split('-');
-              const year = parts[0];
-              const monthDay = parts[1];
-              if (monthDay.length === 3) {
-                // 对于701这种格式，可能是7月01日或者7月1日
-                // 先尝试按7月01日解析
-                let month = monthDay.substring(0, 1);
-                let day = monthDay.substring(1);
-                
-                // 如果日期部分是01-09，则是正确的
-                // 如果日期部分大于31，则可能是错误格式，尝试其他解析
-                if (parseInt(day) > 31) {
-                  // 可能是MMdd格式，如701表示7月1日
-                  month = monthDay.substring(0, 1);
-                  day = monthDay.substring(1);
-                  // 移除前导零
-                  day = parseInt(day).toString();
-                }
-                
-                value = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+        // 处理日期字段 - 统一按文本处理，避免时区转换问题
+        if (dbKey === '开始时间' || dbKey === '结束时间' ||
+            dbKey === '生效日期' || dbKey === '失效日期' ||
+            dbKey === '生效开始时间' || dbKey === '生效结束时间' ||
+            dbKey === '出生日期' || dbKey === '入职日期' ||
+            dbKey === '开始日期' || dbKey === '结束日期' || dbKey === '签订日期' ||
+            dbKey === 'start_date' || dbKey === 'end_date') {
+          // 统一的日期处理逻辑：避免时区转换问题
+          if (value !== null && value !== undefined && value !== '') {
+            if (typeof value === 'number') {
+              // 如果是Excel日期序列号，使用UTC时间转换避免时区问题
+              if (value > 1000) {
+                // 使用1899年12月30日作为基准，避免Excel的1900年闰年bug
+                const excelEpoch = Date.UTC(1899, 11, 30); // 1899年12月30日 UTC
+                const jsDate = new Date(excelEpoch + value * 24 * 60 * 60 * 1000);
+
+                // 直接获取UTC日期组件，避免本地时区影响
+                const year = jsDate.getUTCFullYear();
+                const month = String(jsDate.getUTCMonth() + 1).padStart(2, '0');
+                const day = String(jsDate.getUTCDate()).padStart(2, '0');
+                value = `${year}-${month}-${day}`;
+              } else {
+                // 如果是小数字，可能是文本，转换为字符串
+                value = value.toString();
               }
-            } else if (!isNaN(Number(value))) {
-               // 如果是字符串数字，也按Excel序列号处理
-                const numValue = Number(value);
-                if (numValue > 1000) {
-                  const baseDate = new Date(1900, 0, 1);
-                  let dayOffset = numValue - 1;
-                  
-                  if (numValue >= 60) {
-                    dayOffset = dayOffset - 1;
-                  }
-                  
-                  const jsDate = new Date(baseDate.getTime() + dayOffset * 24 * 60 * 60 * 1000);
-                  value = jsDate.toISOString().split('T')[0];
+            }
+            else if (typeof value === 'string') {
+              // 处理各种字符串日期格式
+              let dateStr = value.toString().trim();
+
+              // 处理 2024/1/1 格式 - 这是最常见的Excel日期格式
+              if (/^\d{4}\/\d{1,2}\/\d{1,2}$/.test(dateStr)) {
+                const parts = dateStr.split('/');
+                const year = parts[0];
+                const month = parts[1].padStart(2, '0');
+                const day = parts[2].padStart(2, '0');
+                value = `${year}-${month}-${day}`;
+              }
+              // 处理特殊日期值
+              else if (dateStr === '9999-12-31' || dateStr.startsWith('9999-')) {
+                // 将9999开头的日期转换为null，表示无结束日期或永久有效
+                value = null;
+              }
+              // 验证标准日期格式并检查范围
+              else if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+                const dateObj = new Date(dateStr);
+                const year = dateObj.getFullYear();
+                if (year > 2100 || year < 1900) {
+                  // 超出合理范围的年份设为null
+                  value = null;
+                } else {
+                  value = dateStr;
                 }
-             }
+              }
+              // 处理 2023-701 格式 (表示2023年7月1日)
+              else if (/^\d{4}-\d{3}$/.test(dateStr)) {
+                const parts = dateStr.split('-');
+                const year = parts[0];
+                const monthDay = parts[1];
+
+                if (monthDay.length === 3) {
+                  let month = monthDay.substring(0, 1);
+                  let day = monthDay.substring(1);
+
+                  // 如果日期部分大于31，可能是错误格式
+                  if (parseInt(day) > 31) {
+                    month = monthDay.substring(0, 1);
+                    day = monthDay.substring(1);
+                    day = parseInt(day).toString();
+                  }
+
+                  value = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+                }
+              }
+              // 处理纯数字字符串（可能是Excel序列号）
+              else if (/^\d+$/.test(dateStr)) {
+                const numValue = Number(dateStr);
+                if (numValue > 1000) {
+                  // 按Excel序列号处理，使用UTC避免时区问题
+                  const excelEpoch = Date.UTC(1899, 11, 30);
+                  const jsDate = new Date(excelEpoch + numValue * 24 * 60 * 60 * 1000);
+
+                  const year = jsDate.getUTCFullYear();
+                  const month = String(jsDate.getUTCMonth() + 1).padStart(2, '0');
+                  const day = String(jsDate.getUTCDate()).padStart(2, '0');
+                  value = `${year}-${month}-${day}`;
+                } else {
+                  // 小数字保持为字符串
+                  value = dateStr;
+                }
+              }
+              // 其他格式保持原样
+              else {
+                value = dateStr;
+              }
+            }
           }
         } else {
           // 非日期字段的数字转换

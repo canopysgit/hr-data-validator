@@ -13,7 +13,8 @@ import {
   Users,
   Shield,
   Search,
-  RefreshCw
+  RefreshCw,
+  DollarSign
 } from "lucide-react";
 
 interface CheckResult {
@@ -33,6 +34,10 @@ interface CheckResult {
     年度?: string;
     缺失项目?: string[];
     合同城市?: string;
+    计算的月均收入?: number;
+    社保缴交基数?: number;
+    检查年度?: string;
+    时间段信息?: string;
   }>;
 }
 
@@ -42,6 +47,7 @@ export default function ComplianceChecker() {
   const [checking2, setChecking2] = useState(false);
   const [checking3, setChecking3] = useState(false);
   const [checking4, setChecking4] = useState(false);
+  const [checking5, setChecking5] = useState(false);
   const [results, setResults] = useState<CheckResult[]>([]);
   const [selectedResult, setSelectedResult] = useState<CheckResult | null>(null);
 
@@ -685,6 +691,180 @@ export default function ComplianceChecker() {
     };
   }
 
+  // 检查5：社保缴交基数与月均收入一致性检查
+  const checkSocialInsuranceBaseConsistency = async (): Promise<CheckResult> => {
+    console.log('🔍 开始社保缴交基数与月均收入一致性检查...');
+
+    // 查询员工社保数据
+    const { data: socialData, error: socialError } = await supabase
+      .from(TABLE_NAMES.EMPLOYEE_SOCIAL_INSURANCE)
+      .select('*');
+
+    if (socialError) {
+      console.error('❌ 查询员工社保数据失败:', socialError);
+      throw socialError;
+    }
+
+    // 查询工资核算结果数据
+    const { data: salaryData, error: salaryError } = await supabase
+      .from(TABLE_NAMES.SALARY_CALCULATION_RESULTS)
+      .select('*');
+
+    if (salaryError) {
+      console.error('❌ 查询工资核算结果数据失败:', salaryError);
+      throw salaryError;
+    }
+
+    console.log(`📊 社保数据: ${socialData?.length || 0} 条记录`);
+    console.log(`📊 工资数据: ${salaryData?.length || 0} 条记录`);
+
+    const issues: Array<{
+      员工工号: string;
+      姓名: string;
+      问题描述: string;
+      检查年度?: string;
+      计算的月均收入?: number;
+      社保缴交基数?: number;
+      时间段信息?: string;
+    }> = [];
+
+    // 按员工工号分组处理社保数据
+    const socialByEmployee: Record<string, Record<string, any[]>> = {};
+    const employeeNames: Record<string, string> = {};
+
+    socialData?.forEach((record: Record<string, unknown>) => {
+      const empId = record.员工工号 as string;
+      const year = record.年度 as string;
+      const empName = record.姓名 as string;
+      const empSurname = record.姓 as string;
+      const empGivenName = record.名 as string;
+
+      // 处理姓名
+      const fullName = empName || `${empSurname || ''}${empGivenName || ''}`;
+      employeeNames[empId] = fullName;
+
+      if (!socialByEmployee[empId]) {
+        socialByEmployee[empId] = {};
+      }
+      if (!socialByEmployee[empId][year]) {
+        socialByEmployee[empId][year] = [];
+      }
+      socialByEmployee[empId][year].push(record);
+    });
+
+    // 按员工工号分组处理工资数据
+    const salaryByEmployee: Record<string, Record<string, any[]>> = {};
+
+    salaryData?.forEach((record: Record<string, unknown>) => {
+      const empId = record.employee_id as string;
+      const startDate = record.start_date as string;
+
+      if (!startDate) return;
+
+      // 根据start_date计算年度
+      const year = new Date(startDate).getFullYear().toString();
+
+      if (!salaryByEmployee[empId]) {
+        salaryByEmployee[empId] = {};
+      }
+      if (!salaryByEmployee[empId][year]) {
+        salaryByEmployee[empId][year] = [];
+      }
+      salaryByEmployee[empId][year].push(record);
+    });
+
+    console.log(`👥 有社保记录的员工: ${Object.keys(socialByEmployee).length} 人`);
+    console.log(`💰 有工资记录的员工: ${Object.keys(salaryByEmployee).length} 人`);
+
+    // 对每个员工的每个年度进行检查
+    Object.keys(socialByEmployee).forEach(empId => {
+      const empName = employeeNames[empId] || '未知姓名';
+
+      Object.keys(socialByEmployee[empId]).forEach(year => {
+        const socialRecords = socialByEmployee[empId][year];
+        const salaryRecords = salaryByEmployee[empId]?.[year] || [];
+
+        // 筛选税前应发合计的工资记录
+        const taxableIncomeRecords = salaryRecords.filter((record: Record<string, unknown>) =>
+          record.salary_item_name === '税前应发合计'
+        );
+
+        if (taxableIncomeRecords.length === 0) {
+          issues.push({
+            员工工号: empId,
+            姓名: empName,
+            问题描述: '该员工工资信息缺失',
+            检查年度: year,
+            时间段信息: `${year}年度`
+          });
+          return;
+        }
+
+        // 检查是否有完整12个月的工资数据
+        if (taxableIncomeRecords.length < 12) {
+          issues.push({
+            员工工号: empId,
+            姓名: empName,
+            问题描述: '该员工工资不足12个月',
+            检查年度: year,
+            时间段信息: `${year}年度 (实际${taxableIncomeRecords.length}个月)`
+          });
+          return;
+        }
+
+        // 计算年度总收入和月均收入
+        const totalIncome = taxableIncomeRecords.reduce((sum: number, record: Record<string, unknown>) =>
+          sum + (record.amount as number || 0), 0
+        );
+        const monthlyAverage = Math.round(totalIncome / 12); // 四舍五入取整数
+
+        // 查找对应的社保缴交基数
+        const socialRecord = socialRecords.find((record: Record<string, unknown>) =>
+          record.缴交基数 !== null && record.缴交基数 !== undefined
+        );
+
+        if (!socialRecord) {
+          issues.push({
+            员工工号: empId,
+            姓名: empName,
+            问题描述: '无法找到该员工的社保缴交基数',
+            检查年度: year,
+            计算的月均收入: monthlyAverage,
+            时间段信息: `${year}年度`
+          });
+          return;
+        }
+
+        const socialBase = socialRecord.缴交基数 as number;
+
+        // 比较月均收入与社保缴交基数
+        if (monthlyAverage !== socialBase) {
+          issues.push({
+            员工工号: empId,
+            姓名: empName,
+            问题描述: `月均收入与社保缴交基数不一致：${monthlyAverage} ≠ ${socialBase}`,
+            检查年度: year,
+            计算的月均收入: monthlyAverage,
+            社保缴交基数: socialBase,
+            时间段信息: `${year}年度`
+          });
+        }
+      });
+    });
+
+    console.log('🔍 社保缴交基数与月均收入一致性检查结果:');
+    console.log(`  - 总问题数: ${issues.length}`);
+    console.log(`  - 问题详情:`, issues.slice(0, 5));
+
+    return {
+      type: 'social_insurance_base_consistency',
+      title: '社保缴交基数与月均收入一致性检查',
+      level: (issues.length > 0 ? 'high' : 'low') as 'high' | 'medium' | 'low',
+      count: issues.length,
+      details: issues
+    };
+  }
+
   // 执行检查1：员工社保记录完整性检查
   const executeCheck1 = async () => {
     setChecking1(true);
@@ -766,6 +946,24 @@ export default function ComplianceChecker() {
     }
   }
 
+  // 执行检查5：社保缴交基数与月均收入一致性检查
+  const executeCheck5 = async () => {
+    setChecking5(true);
+    setResults([]);
+    setSelectedResult(null);
+
+    try {
+      const result = await checkSocialInsuranceBaseConsistency();
+      setResults([result]);
+      setSelectedResult(result);
+      console.log('社保缴交基数与月均收入一致性检查完成:', result);
+    } catch (error) {
+      console.error('社保缴交基数与月均收入一致性检查失败:', error);
+    } finally {
+      setChecking5(false);
+    }
+  }
+
   // 执行所有检查
   const executeAllChecks = async () => {
     setChecking(true);
@@ -787,7 +985,10 @@ export default function ComplianceChecker() {
       // 执行检查4：员工缴纳地一致性
       const paymentLocationConsistencyResult = await checkPaymentLocationConsistency();
 
-      const allResults = [socialInsuranceResult, contributionRatioResult, socialInsuranceCompletenessResult, paymentLocationConsistencyResult];
+      // 执行检查5：社保缴交基数与月均收入一致性
+      const socialInsuranceBaseConsistencyResult = await checkSocialInsuranceBaseConsistency();
+
+      const allResults = [socialInsuranceResult, contributionRatioResult, socialInsuranceCompletenessResult, paymentLocationConsistencyResult, socialInsuranceBaseConsistencyResult];
 
       setResults(allResults);
       console.log('检查完成，结果:', allResults);
@@ -964,6 +1165,40 @@ export default function ComplianceChecker() {
             </CardContent>
           </Card>
 
+          {/* 第五个检查：社保缴交基数与月均收入一致性检查 */}
+          <Card className="border border-gray-200">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <DollarSign className="h-5 w-5 text-indigo-600" />
+                社保缴交基数与月均收入一致性检查
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between">
+                <div className="text-sm text-gray-600">
+                  验证员工社保缴交基数是否与其月均收入保持一致
+                </div>
+                <Button
+                  onClick={() => executeCheck5()}
+                  disabled={checking5}
+                  className="bg-indigo-600 hover:bg-indigo-700"
+                >
+                  {checking5 ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      检查中...
+                    </>
+                  ) : (
+                    <>
+                      <Search className="h-4 w-4 mr-2" />
+                      执行检查
+                    </>
+                  )}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
           {/* 执行所有检查按钮 */}
           <div className="pt-4 border-t">
             <div className="flex items-center justify-between">
@@ -1085,6 +1320,14 @@ export default function ComplianceChecker() {
                             <TableHead>时间段</TableHead>
                           </>
                         )}
+                        {selectedResult.type === 'social_insurance_base_consistency' && (
+                          <>
+                            <TableHead>检查年度</TableHead>
+                            <TableHead>计算的月均收入</TableHead>
+                            <TableHead>社保缴交基数</TableHead>
+                            <TableHead>时间段信息</TableHead>
+                          </>
+                        )}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1126,6 +1369,22 @@ export default function ComplianceChecker() {
                               </TableCell>
                             </>
                           )}
+                          {selectedResult.type === 'social_insurance_base_consistency' && (
+                            <>
+                              <TableCell>{detail.检查年度 || '-'}</TableCell>
+                              <TableCell className="font-mono">
+                                {detail.计算的月均收入 !== undefined && detail.计算的月均收入 !== null
+                                  ? detail.计算的月均收入.toLocaleString() + '元'
+                                  : '-'}
+                              </TableCell>
+                              <TableCell className="font-mono">
+                                {detail.社保缴交基数 !== undefined && detail.社保缴交基数 !== null
+                                  ? detail.社保缴交基数.toLocaleString() + '元'
+                                  : '-'}
+                              </TableCell>
+                              <TableCell className="text-sm">{detail.时间段信息 || '-'}</TableCell>
+                            </>
+                          )}
                         </TableRow>
                       ))}
                     </TableBody>
@@ -1148,8 +1407,9 @@ export default function ComplianceChecker() {
               <p>• <strong>已实现 - 员工社保记录完整性检查</strong>：检查所有员工是否都有社保缴纳记录</p>
               <p>• <strong>已实现 - 员工社保缴纳比例一致性检查</strong>：检查险种完整性（4项基本险种）+ 比例准确性（支持模糊匹配）</p>
               <p>• <strong>已实现 - 员工社保记录项目完整性检查</strong>：按社保年度检查每个员工是否具备完整的4项基本险种记录</p>
+              <p>• <strong>已实现 - 员工缴纳地一致性检查</strong>：检查员工社保缴交地与劳动合同主体所在城市是否一致</p>
+              <p>• <strong>已实现 - 社保缴交基数与月均收入一致性检查</strong>：验证员工社保缴交基数是否与其月均收入保持一致</p>
               <p>• <strong>开发中 - 员工与组织匹配性检查</strong>：验证员工与组织架构匹配关系</p>
-              <p>• <strong>开发中 - 缴费基数合规性检查</strong>：检查缴费基数是否在标准范围内</p>
               <p>• <strong>开发中 - 缴费记录时效性检查</strong>：验证缴费记录的时效性</p>
             </div>
           </CardContent>

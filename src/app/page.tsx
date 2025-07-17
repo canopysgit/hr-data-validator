@@ -130,6 +130,15 @@ export default function Home() {
                       <Badge variant="secondary" className="bg-purple-100 text-purple-800">已实现</Badge>
                     </div>
                   </div>
+                  <div className="p-4 border rounded-lg bg-indigo-50 border-indigo-200">
+                    <h3 className="font-medium mb-2 text-indigo-800">社保缴交基数与月均收入一致性检查</h3>
+                    <p className="text-sm text-gray-600 mb-3">
+                      验证员工社保缴交基数是否与其月均收入保持一致，确保缴费基数的合规性。
+                    </p>
+                    <div className="flex items-center justify-between">
+                      <Badge variant="secondary" className="bg-indigo-100 text-indigo-800">已实现</Badge>
+                    </div>
+                  </div>
                 </div>
               </CardContent>
             </Card>
