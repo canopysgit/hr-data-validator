@@ -195,102 +195,85 @@ export default function DataImport() {
         // 处理数据类型转换
         let value = row[key];
 
-        // 处理日期字段 - 统一按文本处理，避免时区转换问题
+        // 🔥 处理日期字段 - 完全按文本处理，禁用Excel日期序列号转换
         if (dbKey === '开始时间' || dbKey === '结束时间' ||
             dbKey === '生效日期' || dbKey === '失效日期' ||
             dbKey === '生效开始时间' || dbKey === '生效结束时间' ||
             dbKey === '出生日期' || dbKey === '入职日期' ||
             dbKey === '开始日期' || dbKey === '结束日期' || dbKey === '签订日期' ||
             dbKey === 'start_date' || dbKey === 'end_date') {
-          // 统一的日期处理逻辑：避免时区转换问题
+
+          console.log(`🗓️ 处理日期字段 ${dbKey}:`, { 原始值: value, 类型: typeof value });
+
+          // ✅ 正确处理Excel日期：使用XLSX库解析日期序列号
           if (value !== null && value !== undefined && value !== '') {
             if (typeof value === 'number') {
-              // 如果是Excel日期序列号，使用UTC时间转换避免时区问题
-              if (value > 1000) {
-                // 使用1899年12月30日作为基准，避免Excel的1900年闰年bug
-                const excelEpoch = Date.UTC(1899, 11, 30); // 1899年12月30日 UTC
-                const jsDate = new Date(excelEpoch + value * 24 * 60 * 60 * 1000);
-
-                // 直接获取UTC日期组件，避免本地时区影响
-                const year = jsDate.getUTCFullYear();
-                const month = String(jsDate.getUTCMonth() + 1).padStart(2, '0');
-                const day = String(jsDate.getUTCDate()).padStart(2, '0');
-                value = `${year}-${month}-${day}`;
-              } else {
-                // 如果是小数字，可能是文本，转换为字符串
-                value = value.toString();
+              // Excel日期序列号：使用XLSX库的正确解析方法
+              try {
+                // 使用XLSX库解析Excel日期序列号
+                const excelDate = XLSX.SSF.parse_date_code(value);
+                if (excelDate && excelDate.y && excelDate.m && excelDate.d) {
+                  const year = excelDate.y;
+                  const month = String(excelDate.m).padStart(2, '0');
+                  const day = String(excelDate.d).padStart(2, '0');
+                  value = `${year}-${month}-${day}`;
+                  console.log(`✅ Excel序列号解析: ${value} (原始: ${row[key]}) -> ${year}-${month}-${day}`);
+                } else {
+                  // 如果解析失败，保持原始数字转字符串
+                  value = String(value);
+                  console.log(`⚠️ Excel日期解析失败，保持原始值: ${value}`);
+                }
+              } catch (error) {
+                console.error(`❌ Excel日期解析错误:`, error);
+                value = String(value);
               }
             }
             else if (typeof value === 'string') {
-              // 处理各种字符串日期格式
-              const dateStr = value.toString().trim();
+              // 字符串类型：处理各种文本日期格式
+              const dateStr = value.trim();
+              console.log(`📝 字符串日期处理: "${dateStr}"`);
 
-              // 处理 2024/1/1 格式 - 这是最常见的Excel日期格式
-              if (/^\d{4}\/\d{1,2}\/\d{1,2}$/.test(dateStr)) {
+              // 如果已经是标准格式 YYYY-MM-DD，直接使用
+              if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(dateStr)) {
+                const parts = dateStr.split('-');
+                const year = parts[0];
+                const month = parts[1].padStart(2, '0');
+                const day = parts[2].padStart(2, '0');
+                value = `${year}-${month}-${day}`;
+                console.log(`✅ 标准格式日期: ${value}`);
+              }
+              // 处理 YYYY/MM/DD 格式
+              else if (/^\d{4}\/\d{1,2}\/\d{1,2}$/.test(dateStr)) {
                 const parts = dateStr.split('/');
                 const year = parts[0];
                 const month = parts[1].padStart(2, '0');
                 const day = parts[2].padStart(2, '0');
                 value = `${year}-${month}-${day}`;
+                console.log(`✅ 斜杠格式转换: ${dateStr} -> ${value}`);
               }
-              // 处理特殊日期值
-              else if (dateStr === '9999-12-31' || dateStr.startsWith('9999-')) {
-                // 将9999开头的日期转换为null，表示无结束日期或永久有效
-                value = null;
+              // 处理 MM/DD/YY 格式（如 1/1/23）
+              else if (/^\d{1,2}\/\d{1,2}\/\d{2}$/.test(dateStr)) {
+                const parts = dateStr.split('/');
+                const month = parts[0].padStart(2, '0');
+                const day = parts[1].padStart(2, '0');
+                const year = '20' + parts[2]; // 假设是21世纪
+                value = `${year}-${month}-${day}`;
+                console.log(`✅ 美式短格式转换: ${dateStr} -> ${value}`);
               }
-              // 验证标准日期格式并检查范围
-              else if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-                const dateObj = new Date(dateStr);
-                const year = dateObj.getFullYear();
-                if (year > 2100 || year < 1900) {
-                  // 超出合理范围的年份设为null
-                  value = null;
-                } else {
-                  value = dateStr;
-                }
-              }
-              // 处理 2023-701 格式 (表示2023年7月1日)
-              else if (/^\d{4}-\d{3}$/.test(dateStr)) {
-                const parts = dateStr.split('-');
-                const year = parts[0];
-                const monthDay = parts[1];
-
-                if (monthDay.length === 3) {
-                  let month = monthDay.substring(0, 1);
-                  let day = monthDay.substring(1);
-
-                  // 如果日期部分大于31，可能是错误格式
-                  if (parseInt(day) > 31) {
-                    month = monthDay.substring(0, 1);
-                    day = monthDay.substring(1);
-                    day = parseInt(day).toString();
-                  }
-
-                  value = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-                }
-              }
-              // 处理纯数字字符串（可能是Excel序列号）
-              else if (/^\d+$/.test(dateStr)) {
-                const numValue = Number(dateStr);
-                if (numValue > 1000) {
-                  // 按Excel序列号处理，使用UTC避免时区问题
-                  const excelEpoch = Date.UTC(1899, 11, 30);
-                  const jsDate = new Date(excelEpoch + numValue * 24 * 60 * 60 * 1000);
-
-                  const year = jsDate.getUTCFullYear();
-                  const month = String(jsDate.getUTCMonth() + 1).padStart(2, '0');
-                  const day = String(jsDate.getUTCDate()).padStart(2, '0');
-                  value = `${year}-${month}-${day}`;
-                } else {
-                  // 小数字保持为字符串
-                  value = dateStr;
-                }
-              }
-              // 其他格式保持原样
+              // 其他字符串格式保持原样
               else {
                 value = dateStr;
+                console.log(`✅ 保持原始字符串: ${value}`);
               }
             }
+            else {
+              // 其他类型转为字符串
+              value = String(value);
+              console.log(`⚠️ 其他类型转字符串: ${value}`);
+            }
+          } else {
+            value = null;
+            console.log(`❌ 空值处理: null`);
           }
         } else {
           // 非日期字段的数字转换
@@ -346,6 +329,38 @@ export default function DataImport() {
         const workbook = XLSX.read(data, { type: 'binary' });
         const results: Record<string, { success: boolean; count?: number; error?: string }> = {};
 
+        // 🔥 第一步：并行清空所有选中的表，确保数据一致性
+        console.log('🗑️ 开始清空所有选中的表...');
+        const clearPromises = selectedSheets.map(async (sheetName) => {
+          const tableName = SHEET_TABLE_MAPPING[sheetName as keyof typeof SHEET_TABLE_MAPPING];
+          console.log(`清空表: ${tableName} (对应工作表: ${sheetName})`);
+
+          try {
+            const { error: deleteError } = await supabase.from(tableName).delete().neq('id', 0);
+            if (deleteError) {
+              console.warn(`清空表 ${tableName} 时出现警告:`, deleteError);
+              return { tableName, success: false, error: deleteError.message };
+            }
+            console.log(`✅ 表 ${tableName} 清空成功`);
+            return { tableName, success: true };
+          } catch (error) {
+            console.error(`❌ 清空表 ${tableName} 失败:`, error);
+            return { tableName, success: false, error: String(error) };
+          }
+        });
+
+        // 等待所有表清空完成
+        const clearResults = await Promise.all(clearPromises);
+        const failedClears = clearResults.filter(result => !result.success);
+
+        if (failedClears.length > 0) {
+          console.warn('⚠️ 部分表清空失败:', failedClears);
+          // 继续执行，但记录警告
+        }
+
+        console.log('✅ 所有表清空完成，开始导入数据...');
+
+        // 🔥 第二步：顺序导入数据到各个表
         for (let i = 0; i < selectedSheets.length; i++) {
           const sheetName = selectedSheets[i];
           const tableName = SHEET_TABLE_MAPPING[sheetName as keyof typeof SHEET_TABLE_MAPPING];
@@ -376,68 +391,50 @@ export default function DataImport() {
                 目标表名: tableName
               });
 
-              // 对于城市社保标准配置表，使用UPSERT操作避免主键冲突
-              // 对于其他表，仍然清除现有数据后插入
-              if (tableName === 'city_social_insurance_standards') {
-                console.log(`使用UPSERT操作处理表 ${tableName}，避免主键冲突`);
-              } else {
-                // 清除现有数据
-                const { error: deleteError } = await supabase.from(tableName).delete().neq('id', 0);
-                if (deleteError) {
-                  console.warn(`清除表 ${tableName} 数据时出现警告:`, deleteError);
-                }
-              }
+              // 🔥 优化：使用更大的批量大小和优化的插入策略
+              console.log(`📥 向已清空的表 ${tableName} 插入新数据`);
 
-              // 分批处理数据 (每批20条，减少批次大小)
-              const batchSize = 20;
+              // 🚀 大幅优化批量大小：根据数据量动态调整，显著提升导入速度
+              const batchSize = convertedData.length > 2000 ? 500 : convertedData.length > 500 ? 300 : 150;
               let insertedCount = 0;
 
               for (let j = 0; j < convertedData.length; j += batchSize) {
                 const batch = convertedData.slice(j, j + batchSize);
 
-                console.log(`处理批次 ${Math.floor(j/batchSize) + 1}:`, {
+                const batchIndex = Math.floor(j/batchSize) + 1;
+                console.log(`📦 处理批次 ${batchIndex}/${Math.ceil(convertedData.length/batchSize)}:`, {
                   表名: tableName,
                   批次大小: batch.length,
-                  操作类型: tableName === 'city_social_insurance_standards' ? 'UPSERT' : 'INSERT',
-                  批次数据示例: batch[0]
+                  进度: `${j + batch.length}/${convertedData.length}`
                 });
 
-                let error, insertData;
-                
-                if (tableName === 'city_social_insurance_standards') {
-                  // 使用UPSERT操作，如果ID存在则更新，不存在则插入
-                  const result = await supabase
-                    .from(tableName)
-                    .upsert(batch, { 
-                      onConflict: 'ID',  // 指定冲突字段
-                      ignoreDuplicates: false  // 不忽略重复，而是更新
-                    })
-                    .select();
-                  error = result.error;
-                  insertData = result.data;
-                } else {
-                  // 使用普通INSERT操作
-                  const result = await supabase.from(tableName).insert(batch).select();
-                  error = result.error;
-                  insertData = result.data;
+                try {
+                  // 🔥 优化：移除 .select() 减少网络传输量，提高插入速度
+                  const { error } = await supabase.from(tableName).insert(batch);
+
+                  if (error) {
+                    console.error(`❌ 批次 ${batchIndex} 插入失败:`, {
+                      错误消息: error.message,
+                      错误代码: error.code,
+                      表名: tableName,
+                      批次大小: batch.length
+                    });
+                    throw new Error(`插入失败: ${error.message}`);
+                  }
+
+                  console.log(`✅ 批次 ${batchIndex} 插入成功: ${batch.length} 条记录`);
+                  insertedCount += batch.length;
+
+                  // 🔥 优化：减少UI更新频率，每5个批次更新一次进度
+                  if (batchIndex % 5 === 0 || j + batchSize >= convertedData.length) {
+                    newProgress[i].current = insertedCount;
+                    setImportProgress([...newProgress]);
+                  }
+
+                } catch (batchError) {
+                  console.error(`❌ 批次 ${batchIndex} 处理失败:`, batchError);
+                  throw batchError; // 重新抛出错误，让外层catch处理
                 }
-
-                if (error) {
-                  console.error(`插入数据到表 ${tableName} 失败:`, {
-                    错误: error,
-                    错误消息: error.message,
-                    错误代码: error.code,
-                    错误详情: error.details,
-                    批次数据: batch
-                  });
-                  throw new Error(`插入失败: ${error.message} (代码: ${error.code})`);
-                }
-
-                console.log(`成功插入批次到表 ${tableName}:`, insertData?.length || batch.length);
-
-                insertedCount += batch.length;
-                newProgress[i].current = insertedCount;
-                setImportProgress([...newProgress]);
               }
 
               results[sheetName] = {

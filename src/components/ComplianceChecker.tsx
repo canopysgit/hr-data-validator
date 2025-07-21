@@ -259,7 +259,19 @@ export default function ComplianceChecker() {
 
     if (cityStandardError) {
       console.error('❌ 查询城市社保标准数据失败:', cityStandardError);
-      throw cityStandardError;
+      throw new Error(`查询城市社保标准数据失败: ${cityStandardError.message || JSON.stringify(cityStandardError)}`);
+    }
+
+    if (!cityStandardData || cityStandardData.length === 0) {
+      console.warn('⚠️ 未找到城市社保标准配置数据');
+      return {
+        type: 'social_insurance_base_consistency',
+        title: '社保缴交基数与月均收入一致性检查',
+        level: 'info',
+        count: 0,
+        details: [],
+        message: '未找到城市社保标准配置数据，无法进行检查'
+      };
     }
 
     console.log('📊 数据查询结果:');
@@ -723,17 +735,65 @@ export default function ComplianceChecker() {
 
     if (socialError) {
       console.error('❌ 查询员工社保数据失败:', socialError);
-      throw socialError;
+      throw new Error(`查询员工社保数据失败: ${socialError.message || JSON.stringify(socialError)}`);
     }
 
-    // 查询工资核算结果数据
-    const { data: salaryData, error: salaryError } = await supabase
-      .from(TABLE_NAMES.SALARY_CALCULATION_RESULTS)
-      .select('*');
+    if (!socialData || socialData.length === 0) {
+      console.warn('⚠️ 未找到员工社保数据');
+      return {
+        type: 'social_insurance_base_consistency',
+        title: '社保缴交基数与月均收入一致性检查',
+        level: 'info',
+        count: 0,
+        details: [],
+        message: '未找到员工社保数据，无法进行检查'
+      };
+    }
 
-    if (salaryError) {
-      console.error('❌ 查询工资核算结果数据失败:', salaryError);
-      throw salaryError;
+    // 查询工资核算结果数据（分页查询以获取所有数据）
+    console.log('📊 查询工资核算结果数据...');
+    let allSalaryData: Record<string, unknown>[] = [];
+    let from = 0;
+    const pageSize = 1000;
+
+    while (true) {
+      const { data: pageData, error: salaryError } = await supabase
+        .from(TABLE_NAMES.SALARY_CALCULATION_RESULTS)
+        .select('*')
+        .range(from, from + pageSize - 1);
+
+      if (salaryError) {
+        console.error('❌ 查询工资核算结果数据失败:', salaryError);
+        throw new Error(`查询工资核算结果数据失败: ${salaryError.message || JSON.stringify(salaryError)}`);
+      }
+
+      if (!pageData || pageData.length === 0) {
+        break;
+      }
+
+      allSalaryData = allSalaryData.concat(pageData);
+      console.log(`📄 已加载 ${allSalaryData.length} 条工资记录...`);
+
+      if (pageData.length < pageSize) {
+        break; // 最后一页
+      }
+
+      from += pageSize;
+    }
+
+    const salaryData = allSalaryData;
+    console.log(`✅ 总共加载了 ${salaryData.length} 条工资记录`);
+
+    if (!salaryData || salaryData.length === 0) {
+      console.warn('⚠️ 未找到工资核算结果数据');
+      return {
+        type: 'social_insurance_base_consistency',
+        title: '社保缴交基数与月均收入一致性检查',
+        level: 'info',
+        count: 0,
+        details: [],
+        message: '未找到工资核算结果数据，无法进行检查'
+      };
     }
 
     // 查询城市社保标准配置数据
@@ -889,11 +949,11 @@ export default function ComplianceChecker() {
           issues.push({
             员工工号: empId,
             姓名: empName,
-            问题描述: `该员工工号缴费记录缺失`,
+            问题描述: `缺少${salaryYear}年工资数据，无法计算${socialYear}社保基数`,
             检查年度: socialYear,
             计算的月均收入: undefined,
             社保缴交基数: undefined,
-            时间段信息: `${socialYear} (基于${salaryYear}年工资数据)`
+            时间段信息: `${socialYear} (需要${salaryYear}年工资数据)`
           });
           return;
         }
@@ -903,7 +963,7 @@ export default function ComplianceChecker() {
           issues.push({
             员工工号: empId,
             姓名: empName,
-            问题描述: `该员工${salaryYear}年工资数据不足12个月，无法准确计算${socialYear}社保基数`,
+            问题描述: `${salaryYear}年工资数据不足12个月(${taxableIncomeRecords.length}个月)，无法准确计算${socialYear}社保基数`,
             检查年度: socialYear,
             计算的月均收入: undefined,
             社保缴交基数: undefined,
@@ -1109,12 +1169,26 @@ export default function ComplianceChecker() {
     setSelectedResult(null);
 
     try {
+      console.log('🔍 开始执行社保缴交基数与月均收入一致性检查...');
       const result = await checkSocialInsuranceBaseConsistency();
       setResults([result]);
       setSelectedResult(result);
-      console.log('社保缴交基数与月均收入一致性检查完成:', result);
+      console.log('✅ 社保缴交基数与月均收入一致性检查完成:', result);
     } catch (error) {
-      console.error('社保缴交基数与月均收入一致性检查失败:', error);
+      console.error('❌ 社保缴交基数与月均收入一致性检查失败:', error);
+      
+      // 创建错误结果对象
+      const errorResult: CheckResult = {
+        type: 'social_insurance_base_consistency',
+        title: '社保缴交基数与月均收入一致性检查',
+        level: 'error',
+        count: 0,
+        details: [],
+        message: `检查失败: ${error instanceof Error ? error.message : '未知错误'}`
+      };
+      
+      setResults([errorResult]);
+      setSelectedResult(errorResult);
     } finally {
       setChecking5(false);
     }
