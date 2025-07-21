@@ -434,7 +434,7 @@ export default function ComplianceChecker() {
       employeeNames[empId] = fullName;
 
       // 使用数据库中的年度字段，如果没有则计算社保年度
-      const year = record.年度 ? `${record.年度}年度` : getSocialInsuranceYear(startTime);
+      const year = record.社保年度 ? `${record.社保年度}年度` : getSocialInsuranceYear(startTime);
 
       // 初始化数据结构
       if (!employeeYearlyData[empId]) {
@@ -691,9 +691,30 @@ export default function ComplianceChecker() {
     };
   }
 
-  // 检查5：社保缴交基数与月均收入一致性检查
+  // 检查5：社保缴交基数与月均收入一致性检查（精细化版本）
   const checkSocialInsuranceBaseConsistency = async (): Promise<CheckResult> => {
-    console.log('🔍 开始社保缴交基数与月均收入一致性检查...');
+    console.log('🔍 开始社保缴交基数与月均收入一致性检查（精细化版本）...');
+
+    // 获取社保年度函数（7.1-6.30）
+    const getSocialInsuranceYear = (dateStr: string): string => {
+      try {
+        const date = new Date(normalizeDate(dateStr));
+        const year = date.getFullYear();
+        const month = date.getMonth() + 1; // getMonth() 返回 0-11
+
+        // 社保年度定义：X年度 = X年7月1日 到 X+1年6月30日
+        // 例如：2022年度 = 2022年7月1日 到 2023年6月30日
+        if (month >= 7) {
+          // 7月1日及以后，属于当年度
+          return `${year}年度`;
+        } else {
+          // 1月1日到6月30日，属于上一年度
+          return `${year - 1}年度`;
+        }
+      } catch {
+        return '未知年度';
+      }
+    };
 
     // 查询员工社保数据
     const { data: socialData, error: socialError } = await supabase
@@ -715,8 +736,45 @@ export default function ComplianceChecker() {
       throw salaryError;
     }
 
+    // 查询城市社保标准配置数据
+    const { data: cityStandardData, error: cityStandardError } = await supabase
+      .from(TABLE_NAMES.CITY_STANDARDS)
+      .select('*');
+
+    if (cityStandardError) {
+      console.error('❌ 查询城市社保标准数据失败:', cityStandardError);
+      throw cityStandardError;
+    }
+
     console.log(`📊 社保数据: ${socialData?.length || 0} 条记录`);
     console.log(`📊 工资数据: ${salaryData?.length || 0} 条记录`);
+    console.log(`📊 城市标准数据: ${cityStandardData?.length || 0} 条记录`);
+
+    // 数据格式转换函数：将"4569元"转换为数字4569
+    const parseAmount = (amountStr: string | number): number => {
+      if (typeof amountStr === 'number') return amountStr;
+      if (!amountStr) return 0;
+      return parseInt(String(amountStr).replace(/[^\d]/g, '')) || 0;
+    };
+
+    // 查找匹配的城市标准配置
+    const findCityStandard = (city: string, insuranceType: string, year: string) => {
+      const standardizedCity = standardizeCity(city);
+      const standardizedType = standardizeInsuranceType(insuranceType);
+
+      return cityStandardData?.find((standard: Record<string, unknown>) => {
+        const stdCity = standardizeCity(standard.城市 as string);
+        const stdType = standardizeInsuranceType(standard.险种类型 as string);
+        const stdYear = standard.社保年度 as string;
+
+        return stdCity === standardizedCity &&
+               stdType === standardizedType &&
+               stdYear === year;
+      });
+    };
+
+    // 需要检查的险种（个人缴纳的4项基本险种）
+    const requiredInsuranceTypes = ['养老保险', '医疗保险', '失业保险', '公积金'];
 
     const issues: Array<{
       员工工号: string;
@@ -728,32 +786,66 @@ export default function ComplianceChecker() {
       时间段信息?: string;
     }> = [];
 
-    // 按员工工号分组处理社保数据
-    const socialByEmployee: Record<string, Record<string, any[]>> = {};
+    // 按员工工号、年度、险种分组处理社保数据
+    const socialByEmployeeYearType: Record<string, Record<string, Record<string, Record<string, unknown>[]>>> = {};
     const employeeNames: Record<string, string> = {};
 
     socialData?.forEach((record: Record<string, unknown>) => {
       const empId = record.员工工号 as string;
-      const year = record.年度 as string;
-      const empName = record.姓名 as string;
+      const startTime = record.开始时间 as string;
+      const insuranceType = standardizeInsuranceType(record.险种类型 as string);
       const empSurname = record.姓 as string;
       const empGivenName = record.名 as string;
 
+      // 只处理需要检查的险种
+      if (!requiredInsuranceTypes.includes(insuranceType)) {
+        return;
+      }
+
       // 处理姓名
-      const fullName = empName || `${empSurname || ''}${empGivenName || ''}`;
+      const fullName = `${empSurname || ''}${empGivenName || ''}`;
       employeeNames[empId] = fullName;
 
-      if (!socialByEmployee[empId]) {
-        socialByEmployee[empId] = {};
+      // 使用数据库中的年度字段，如果没有则计算社保年度
+      const year = record.社保年度 ? `${record.社保年度}年度` : getSocialInsuranceYear(startTime);
+
+      // 初始化数据结构
+      if (!socialByEmployeeYearType[empId]) {
+        socialByEmployeeYearType[empId] = {};
       }
-      if (!socialByEmployee[empId][year]) {
-        socialByEmployee[empId][year] = [];
+      if (!socialByEmployeeYearType[empId][year]) {
+        socialByEmployeeYearType[empId][year] = {};
       }
-      socialByEmployee[empId][year].push(record);
+      if (!socialByEmployeeYearType[empId][year][insuranceType]) {
+        socialByEmployeeYearType[empId][year][insuranceType] = [];
+      }
+
+      socialByEmployeeYearType[empId][year][insuranceType].push(record);
+    });
+
+    // 检查重复记录（同一员工同一年度同一险种有多条记录）
+    Object.keys(socialByEmployeeYearType).forEach(empId => {
+      const empName = employeeNames[empId] || '未知姓名';
+
+      Object.keys(socialByEmployeeYearType[empId]).forEach(year => {
+        Object.keys(socialByEmployeeYearType[empId][year]).forEach(insuranceType => {
+          const records = socialByEmployeeYearType[empId][year][insuranceType];
+
+          if (records.length > 1) {
+            issues.push({
+              员工工号: empId,
+              姓名: empName,
+              问题描述: `员工存在重复的社保记录：${year}年度${insuranceType}有${records.length}条记录`,
+              检查年度: year,
+              时间段信息: `${year}年度 ${insuranceType}`
+            });
+          }
+        });
+      });
     });
 
     // 按员工工号分组处理工资数据
-    const salaryByEmployee: Record<string, Record<string, any[]>> = {};
+    const salaryByEmployee: Record<string, Record<string, Record<string, unknown>[]>> = {};
 
     salaryData?.forEach((record: Record<string, unknown>) => {
       const empId = record.employee_id as string;
@@ -773,16 +865,20 @@ export default function ComplianceChecker() {
       salaryByEmployee[empId][year].push(record);
     });
 
-    console.log(`👥 有社保记录的员工: ${Object.keys(socialByEmployee).length} 人`);
+    console.log(`👥 有社保记录的员工: ${Object.keys(socialByEmployeeYearType).length} 人`);
     console.log(`💰 有工资记录的员工: ${Object.keys(salaryByEmployee).length} 人`);
 
-    // 对每个员工的每个年度进行检查
-    Object.keys(socialByEmployee).forEach(empId => {
+    // 对每个员工的每个年度的每个险种进行精细化检查
+    Object.keys(socialByEmployeeYearType).forEach(empId => {
       const empName = employeeNames[empId] || '未知姓名';
 
-      Object.keys(socialByEmployee[empId]).forEach(year => {
-        const socialRecords = socialByEmployee[empId][year];
-        const salaryRecords = salaryByEmployee[empId]?.[year] || [];
+      Object.keys(socialByEmployeeYearType[empId]).forEach(year => {
+        // 修复年度匹配逻辑：社保年度应该基于上一自然年度的工资数据
+        // 例如：2024年度社保基数应该基于2023年工资数据
+        const socialYear = year; // 社保年度，如"2024年度"
+        const salaryYear = (parseInt(year.replace('年度', '')) - 1).toString(); // 工资年度，如"2023"
+
+        const salaryRecords = salaryByEmployee[empId]?.[salaryYear] || [];
 
         // 筛选税前应发合计的工资记录
         const taxableIncomeRecords = salaryRecords.filter((record: Record<string, unknown>) =>
@@ -793,9 +889,11 @@ export default function ComplianceChecker() {
           issues.push({
             员工工号: empId,
             姓名: empName,
-            问题描述: '该员工工资信息缺失',
-            检查年度: year,
-            时间段信息: `${year}年度`
+            问题描述: `该员工工号缴费记录缺失`,
+            检查年度: socialYear,
+            计算的月均收入: undefined,
+            社保缴交基数: undefined,
+            时间段信息: `${socialYear} (基于${salaryYear}年工资数据)`
           });
           return;
         }
@@ -805,9 +903,11 @@ export default function ComplianceChecker() {
           issues.push({
             员工工号: empId,
             姓名: empName,
-            问题描述: '该员工工资不足12个月',
-            检查年度: year,
-            时间段信息: `${year}年度 (实际${taxableIncomeRecords.length}个月)`
+            问题描述: `该员工${salaryYear}年工资数据不足12个月，无法准确计算${socialYear}社保基数`,
+            检查年度: socialYear,
+            计算的月均收入: undefined,
+            社保缴交基数: undefined,
+            时间段信息: `${socialYear} (基于${salaryYear}年${taxableIncomeRecords.length}个月工资数据)`
           });
           return;
         }
@@ -818,37 +918,93 @@ export default function ComplianceChecker() {
         );
         const monthlyAverage = Math.round(totalIncome / 12); // 四舍五入取整数
 
-        // 查找对应的社保缴交基数
-        const socialRecord = socialRecords.find((record: Record<string, unknown>) =>
-          record.缴交基数 !== null && record.缴交基数 !== undefined
-        );
+        // 对每个险种进行检查
+        Object.keys(socialByEmployeeYearType[empId][socialYear]).forEach(insuranceType => {
+          const socialRecords = socialByEmployeeYearType[empId][socialYear][insuranceType];
 
-        if (!socialRecord) {
-          issues.push({
-            员工工号: empId,
-            姓名: empName,
-            问题描述: '无法找到该员工的社保缴交基数',
-            检查年度: year,
-            计算的月均收入: monthlyAverage,
-            时间段信息: `${year}年度`
-          });
-          return;
-        }
+          // 跳过重复记录（已经在前面报错了）
+          if (socialRecords.length > 1) {
+            return;
+          }
 
-        const socialBase = socialRecord.缴交基数 as number;
+          const socialRecord = socialRecords[0];
+          const city = standardizeCity(socialRecord.缴交地 as string);
+          const socialBase = parseAmount(socialRecord.缴交基数 as string | number);
 
-        // 比较月均收入与社保缴交基数
-        if (monthlyAverage !== socialBase) {
-          issues.push({
-            员工工号: empId,
-            姓名: empName,
-            问题描述: `月均收入与社保缴交基数不一致：${monthlyAverage} ≠ ${socialBase}`,
-            检查年度: year,
-            计算的月均收入: monthlyAverage,
-            社保缴交基数: socialBase,
-            时间段信息: `${year}年度`
-          });
-        }
+          if (socialBase === 0) {
+            issues.push({
+              员工工号: empId,
+              姓名: empName,
+              问题描述: `无法找到该员工的社保缴交基数：${insuranceType}`,
+              检查年度: socialYear,
+              计算的月均收入: monthlyAverage,
+              社保缴交基数: socialBase,
+              时间段信息: `${socialYear} ${insuranceType} (基于${salaryYear}年工资)`
+            });
+            return;
+          }
+
+          // 查找对应的城市标准配置（使用社保年度的数字部分）
+          const yearNumber = socialYear.replace('年度', '');
+          const cityStandard = findCityStandard(city, insuranceType, yearNumber);
+
+          if (!cityStandard) {
+            issues.push({
+              员工工号: empId,
+              姓名: empName,
+              问题描述: `未找到社保标准配置：${city} ${insuranceType} ${yearNumber}年度`,
+              检查年度: socialYear,
+              计算的月均收入: monthlyAverage,
+              社保缴交基数: socialBase,
+              时间段信息: `${socialYear} ${insuranceType} (基于${salaryYear}年工资)`
+            });
+            return;
+          }
+
+          // 解析最低和最高缴费基数
+          const minBase = parseAmount(cityStandard.最低缴费基数 as string);
+          const maxBase = parseAmount(cityStandard.最高缴费基数 as string);
+
+          if (minBase === 0 || maxBase === 0) {
+            issues.push({
+              员工工号: empId,
+              姓名: empName,
+              问题描述: `城市标准配置数据异常：${city} ${insuranceType} 最低基数${minBase} 最高基数${maxBase}`,
+              检查年度: socialYear,
+              计算的月均收入: monthlyAverage,
+              社保缴交基数: socialBase,
+              时间段信息: `${socialYear} ${insuranceType} (基于${salaryYear}年工资)`
+            });
+            return;
+          }
+
+          // 计算应缴基数（应用上下限规则）
+          let expectedBase = monthlyAverage;
+          let ruleDescription = '';
+
+          if (monthlyAverage > maxBase) {
+            expectedBase = maxBase;
+            ruleDescription = `${salaryYear}年月均收入${monthlyAverage.toLocaleString()}超过最高标准，应按最高基数${maxBase.toLocaleString()}`;
+          } else if (monthlyAverage < minBase) {
+            expectedBase = minBase;
+            ruleDescription = `${salaryYear}年月均收入${monthlyAverage.toLocaleString()}低于最低标准，应按最低基数${minBase.toLocaleString()}`;
+          } else {
+            ruleDescription = `${salaryYear}年月均收入${monthlyAverage.toLocaleString()}在标准范围内`;
+          }
+
+          // 检查实际缴交基数是否符合规则
+          if (socialBase !== expectedBase) {
+            issues.push({
+              员工工号: empId,
+              姓名: empName,
+              问题描述: `缴交基数不符合规则：实际${socialBase.toLocaleString()}，应为${expectedBase.toLocaleString()}（${ruleDescription}，标准范围${minBase.toLocaleString()}-${maxBase.toLocaleString()}）`,
+              检查年度: socialYear,
+              计算的月均收入: monthlyAverage,
+              社保缴交基数: socialBase,
+              时间段信息: `${socialYear} ${insuranceType} (基于${salaryYear}年工资)`
+            });
+          }
+        });
       });
     });
 

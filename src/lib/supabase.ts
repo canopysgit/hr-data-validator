@@ -74,7 +74,7 @@ export type Database = {
     员工工号: string | null
     姓: string | null
     名: string | null
-    年度: string | null
+    社保年度: string | null
     开始时间: string | null
     结束时间: string | null
     险种类型: string | null

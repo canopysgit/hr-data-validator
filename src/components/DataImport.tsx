@@ -91,7 +91,7 @@ export default function DataImport() {
       '身高', '体重'
     ],
     [TABLE_NAMES.EMPLOYEE_SOCIAL_INSURANCE]: [
-      '员工工号', '姓', '名', '年度', '开始时间', '结束时间', '险种类型', '缴交地', '缴交基数',
+      '员工工号', '姓', '名', '社保年度', '开始时间', '结束时间', '险种类型', '缴交地', '缴交基数',
       '个人缴交比例', '公司缴交比例'
     ],
     [TABLE_NAMES.CITY_STANDARDS]: [
@@ -223,7 +223,7 @@ export default function DataImport() {
             }
             else if (typeof value === 'string') {
               // 处理各种字符串日期格式
-              let dateStr = value.toString().trim();
+              const dateStr = value.toString().trim();
 
               // 处理 2024/1/1 格式 - 这是最常见的Excel日期格式
               if (/^\d{4}\/\d{1,2}\/\d{1,2}$/.test(dateStr)) {
