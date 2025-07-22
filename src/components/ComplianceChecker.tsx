@@ -267,7 +267,7 @@ export default function ComplianceChecker() {
       return {
         type: 'social_insurance_base_consistency',
         title: '社保缴交基数与月均收入一致性检查',
-        level: 'info',
+        level: 'low',
         count: 0,
         details: [],
         message: '未找到城市社保标准配置数据，无法进行检查'
@@ -743,7 +743,7 @@ export default function ComplianceChecker() {
       return {
         type: 'social_insurance_base_consistency',
         title: '社保缴交基数与月均收入一致性检查',
-        level: 'info',
+        level: 'low',
         count: 0,
         details: [],
         message: '未找到员工社保数据，无法进行检查'
@@ -789,7 +789,7 @@ export default function ComplianceChecker() {
       return {
         type: 'social_insurance_base_consistency',
         title: '社保缴交基数与月均收入一致性检查',
-        level: 'info',
+        level: 'low',
         count: 0,
         details: [],
         message: '未找到工资核算结果数据，无法进行检查'
