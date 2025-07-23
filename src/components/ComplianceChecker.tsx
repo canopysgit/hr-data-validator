@@ -34,8 +34,9 @@ interface CheckResult {
     年度?: string;
     缺失项目?: string[];
     合同城市?: string;
-    计算的月均收入?: number;
-    社保缴交基数?: number;
+    根据工资表计算的月均收入?: number;
+    员工社保信息中登记的缴交基数?: number;
+    社保标准中的缴交基数?: number;
     检查年度?: string;
     时间段信息?: string;
   }>;
@@ -842,8 +843,9 @@ export default function ComplianceChecker() {
       姓名: string;
       问题描述: string;
       检查年度?: string;
-      计算的月均收入?: number;
-      社保缴交基数?: number;
+      根据工资表计算的月均收入?: number;
+      员工社保信息中登记的缴交基数?: number;
+      社保标准中的缴交基数?: number;
       时间段信息?: string;
     }> = [];
 
@@ -952,8 +954,9 @@ export default function ComplianceChecker() {
             姓名: empName,
             问题描述: `缺少${salaryYear}年工资数据，无法计算${socialYear}社保基数`,
             检查年度: socialYear,
-            计算的月均收入: undefined,
-            社保缴交基数: undefined,
+            根据工资表计算的月均收入: undefined,
+            员工社保信息中登记的缴交基数: undefined,
+            社保标准中的缴交基数: undefined,
             时间段信息: `${socialYear} (需要${salaryYear}年工资数据)`
           });
           return;
@@ -966,8 +969,9 @@ export default function ComplianceChecker() {
             姓名: empName,
             问题描述: `${salaryYear}年工资数据不足12个月(${taxableIncomeRecords.length}个月)，无法准确计算${socialYear}社保基数`,
             检查年度: socialYear,
-            计算的月均收入: undefined,
-            社保缴交基数: undefined,
+            根据工资表计算的月均收入: undefined,
+            员工社保信息中登记的缴交基数: undefined,
+            社保标准中的缴交基数: undefined,
             时间段信息: `${socialYear} (基于${salaryYear}年${taxableIncomeRecords.length}个月工资数据)`
           });
           return;
@@ -998,8 +1002,9 @@ export default function ComplianceChecker() {
               姓名: empName,
               问题描述: `无法找到该员工的社保缴交基数：${insuranceType}`,
               检查年度: socialYear,
-              计算的月均收入: monthlyAverage,
-              社保缴交基数: socialBase,
+              根据工资表计算的月均收入: monthlyAverage,
+              员工社保信息中登记的缴交基数: socialBase,
+              社保标准中的缴交基数: undefined,
               时间段信息: `${socialYear} ${insuranceType} (基于${salaryYear}年工资)`
             });
             return;
@@ -1015,8 +1020,9 @@ export default function ComplianceChecker() {
               姓名: empName,
               问题描述: `未找到社保标准配置：${city} ${insuranceType} ${yearNumber}年度`,
               检查年度: socialYear,
-              计算的月均收入: monthlyAverage,
-              社保缴交基数: socialBase,
+              根据工资表计算的月均收入: monthlyAverage,
+              员工社保信息中登记的缴交基数: socialBase,
+              社保标准中的缴交基数: undefined,
               时间段信息: `${socialYear} ${insuranceType} (基于${salaryYear}年工资)`
             });
             return;
@@ -1032,8 +1038,9 @@ export default function ComplianceChecker() {
               姓名: empName,
               问题描述: `城市标准配置数据异常：${city} ${insuranceType} 最低基数${minBase} 最高基数${maxBase}`,
               检查年度: socialYear,
-              计算的月均收入: monthlyAverage,
-              社保缴交基数: socialBase,
+              根据工资表计算的月均收入: monthlyAverage,
+              员工社保信息中登记的缴交基数: socialBase,
+              社保标准中的缴交基数: undefined,
               时间段信息: `${socialYear} ${insuranceType} (基于${salaryYear}年工资)`
             });
             return;
@@ -1060,8 +1067,9 @@ export default function ComplianceChecker() {
               姓名: empName,
               问题描述: `缴交基数不符合规则：实际${socialBase.toLocaleString()}，应为${expectedBase.toLocaleString()}（${ruleDescription}，标准范围${minBase.toLocaleString()}-${maxBase.toLocaleString()}）`,
               检查年度: socialYear,
-              计算的月均收入: monthlyAverage,
-              社保缴交基数: socialBase,
+              根据工资表计算的月均收入: monthlyAverage,
+              员工社保信息中登记的缴交基数: socialBase,
+              社保标准中的缴交基数: expectedBase,
               时间段信息: `${socialYear} ${insuranceType} (基于${salaryYear}年工资)`
             });
           }
@@ -1554,8 +1562,9 @@ export default function ComplianceChecker() {
                         {selectedResult.type === 'social_insurance_base_consistency' && (
                           <>
                             <TableHead>检查年度</TableHead>
-                            <TableHead>计算的月均收入</TableHead>
-                            <TableHead>社保缴交基数</TableHead>
+                            <TableHead>根据工资表计算的月均收入</TableHead>
+                            <TableHead>员工社保信息中登记的缴交基数</TableHead>
+                            <TableHead>社保标准中的缴交基数</TableHead>
                             <TableHead>时间段信息</TableHead>
                           </>
                         )}
@@ -1604,13 +1613,18 @@ export default function ComplianceChecker() {
                             <>
                               <TableCell>{detail.检查年度 || '-'}</TableCell>
                               <TableCell className="font-mono">
-                                {detail.计算的月均收入 !== undefined && detail.计算的月均收入 !== null
-                                  ? detail.计算的月均收入.toLocaleString() + '元'
+                                {detail.根据工资表计算的月均收入 !== undefined && detail.根据工资表计算的月均收入 !== null
+                                  ? detail.根据工资表计算的月均收入.toLocaleString() + '元'
                                   : '-'}
                               </TableCell>
                               <TableCell className="font-mono">
-                                {detail.社保缴交基数 !== undefined && detail.社保缴交基数 !== null
-                                  ? detail.社保缴交基数.toLocaleString() + '元'
+                                {detail.员工社保信息中登记的缴交基数 !== undefined && detail.员工社保信息中登记的缴交基数 !== null
+                                  ? detail.员工社保信息中登记的缴交基数.toLocaleString() + '元'
+                                  : '-'}
+                              </TableCell>
+                              <TableCell className="font-mono">
+                                {detail.社保标准中的缴交基数 !== undefined && detail.社保标准中的缴交基数 !== null
+                                  ? detail.社保标准中的缴交基数.toLocaleString() + '元'
                                   : '-'}
                               </TableCell>
                               <TableCell className="text-sm">{detail.时间段信息 || '-'}</TableCell>
