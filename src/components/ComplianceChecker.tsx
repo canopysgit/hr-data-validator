@@ -39,6 +39,7 @@ interface CheckResult {
     检查年度?: string;
     时间段信息?: string;
   }>;
+  message?: string;
 }
 
 export default function ComplianceChecker() {
@@ -1181,7 +1182,7 @@ export default function ComplianceChecker() {
       const errorResult: CheckResult = {
         type: 'social_insurance_base_consistency',
         title: '社保缴交基数与月均收入一致性检查',
-        level: 'error',
+        level: 'high',
         count: 0,
         details: [],
         message: `检查失败: ${error instanceof Error ? error.message : '未知错误'}`
