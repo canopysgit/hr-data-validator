@@ -15,7 +15,13 @@ export const TABLE_NAMES = {
   EMPLOYEE_DATES: 'employee_dates',
   CITY_STANDARDS: 'city_social_insurance_standards',
   EMPLOYEE_CONTRACTS: 'employee_contracts',
-  SALARY_CALCULATION_RESULTS: 'salary_calculation_results'
+  SALARY_CALCULATION_RESULTS: 'salary_calculation_results',
+  // 五险一金计算相关表
+  BJ2020: 'bj2020',
+  BJ2021: 'bj2021',
+  BJ2022: 'bj2022',
+  BASE: 'base',
+  CALCULATE: 'calculate'
 } as const
 
 // 类型定义

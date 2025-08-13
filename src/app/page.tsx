@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import DataImport from "@/components/DataImport";
 import DataViewer from "@/components/DataViewer";
 import ComplianceChecker from "@/components/ComplianceChecker";
+import SSHFCalculator from "@/components/SSHFCalculator";
 import {
   Upload,
   Database,
@@ -19,7 +20,8 @@ import {
   AlertTriangle,
   Users,
   Building,
-  DollarSign
+  DollarSign,
+  Calculator
 } from "lucide-react";
 
 export default function Home() {
@@ -49,7 +51,7 @@ export default function Home() {
 
       <div className="container mx-auto px-6 py-6">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-5 lg:w-1/2">
+          <TabsList className="grid w-full grid-cols-6 lg:w-3/5">
             <TabsTrigger value="upload" className="flex items-center gap-2">
               <Upload className="h-4 w-4" />
               数据上传
@@ -69,6 +71,10 @@ export default function Home() {
             <TabsTrigger value="report" className="flex items-center gap-2">
               <FileText className="h-4 w-4" />
               检查报告
+            </TabsTrigger>
+            <TabsTrigger value="sshf" className="flex items-center gap-2">
+              <Calculator className="h-4 w-4" />
+              五险一金
             </TabsTrigger>
           </TabsList>
 
@@ -177,6 +183,11 @@ export default function Home() {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* 五险一金计算模块 */}
+          <TabsContent value="sshf" className="space-y-6">
+            <SSHFCalculator />
           </TabsContent>
         </Tabs>
       </div>
