@@ -21,6 +21,33 @@ import {
   TrendingUp
 } from "lucide-react";
 
+// 定义规则类型
+interface BaseRule {
+  养老保险基数上限: string;
+  养老保险基数下限: string;
+  住房公积金基数上限: string;
+  住房公积金基数下限: string;
+  养老保险费率_企业: string;
+  医疗保险费率_企业: string;
+  失业保险费率_企业: string;
+  工伤保险费率_企业: string;
+  生育保险费率_企业: string;
+  住房公积金费率_企业: string;
+}
+
+interface ProcessedRules {
+  '养老保险基数上限': number;
+  '养老保险基数下限': number;
+  '住房公积金基数上限': number;
+  '住房公积金基数下限': number;
+  '养老保险费率_企业': number;
+  '医疗保险费率_企业': number;
+  '失业保险费率_企业': number;
+  '工伤保险费率_企业': number;
+  '生育保险费率_企业': number;
+  '住房公积金费率_企业': number;
+}
+
 interface CalculationStep {
   step: number;
   title: string;
@@ -262,7 +289,7 @@ export default function SSHFCalculator() {
       throw new Error(`未找到 ${year}年${month}月 的规则配置`);
     }
 
-    const rule = data[0] as any;
+    const rule = data[0] as BaseRule;
 
     return {
       '养老保险基数上限': parseFloat(rule['养老保险基数上限']),
@@ -278,13 +305,13 @@ export default function SSHFCalculator() {
     };
   };
 
-  const calculateBases = (referenceSalary: number, rules: any) => {
+  const calculateBases = (referenceSalary: number, rules: ProcessedRules) => {
     const ssBase = Math.min(Math.max(referenceSalary, rules['养老保险基数下限']), rules['养老保险基数上限']);
     const hfBase = Math.min(Math.max(referenceSalary, rules['住房公积金基数下限']), rules['住房公积金基数上限']);
     return { ssBase, hfBase };
   };
 
-  const calculateEnterpriseContributions = (ssBase: number, hfBase: number, rules: any) => {
+  const calculateEnterpriseContributions = (ssBase: number, hfBase: number, rules: ProcessedRules) => {
     return {
       pension_enterprise: ssBase * rules['养老保险费率_企业'],
       medical_enterprise: ssBase * rules['医疗保险费率_企业'],
